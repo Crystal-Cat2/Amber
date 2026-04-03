@@ -1,0 +1,2 @@
+experiment_group,product,ad_format,network_type,network,status_bucket,request_pv,denominator_request_pv,share
+have_is_adx,com.demo.app,rewarded,waterfall,AdMob,FAILED_TO_LOAD,8,20,0.4

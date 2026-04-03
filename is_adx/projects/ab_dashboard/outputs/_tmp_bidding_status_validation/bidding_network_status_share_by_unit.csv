@@ -1,0 +1,2 @@
+experiment_group,product,ad_format,max_unit_id,network_type,network,status_bucket,request_pv,denominator_request_pv,share
+have_is_adx,com.demo.app,interstitial,u1,bidding,AdMob,NULL,20,20,1.0

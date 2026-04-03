@@ -1,0 +1,3 @@
+experiment_group,product,ad_format,status,network,request_pv,denominator_request_pv,share
+no_is_adx,demo,interstitial,FAILED_TO_LOAD,Google,3,10,0.3
+have_is_adx,demo,interstitial,FAILED_TO_LOAD,Google,2,8,0.25

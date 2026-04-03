@@ -1,0 +1,5 @@
+experiment_group,product,ad_format,network_cnt,request_pv,denominator_request_pv,share
+no_is_adx,demo,interstitial,1,4,10,0.4
+no_is_adx,demo,interstitial,2,6,10,0.6
+have_is_adx,demo,interstitial,1,5,8,0.625
+have_is_adx,demo,interstitial,2,3,8,0.375

@@ -1,0 +1,5 @@
+experiment_group,product,ad_format,network_type,network,status_bucket,configured_unit_count,observed_unit_count,configured_total_request_pv,configured_denominator_request_pv,configured_share,status
+have_is_adx,com.demo.app,interstitial,bidding,AdMob,AD_LOADED,1,1,0,20,0.0,PASS
+have_is_adx,com.demo.app,interstitial,bidding,AdMob,FAILED_TO_LOAD,1,1,0,20,0.0,PASS
+have_is_adx,com.demo.app,interstitial,bidding,AdMob,AD_LOAD_NOT_ATTEMPTED,1,1,0,20,0.0,PASS
+have_is_adx,com.demo.app,interstitial,bidding,AdMob,NULL,1,1,20,20,1.0,PASS

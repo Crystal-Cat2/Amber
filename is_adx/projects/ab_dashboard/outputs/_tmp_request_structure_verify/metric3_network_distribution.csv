@@ -1,0 +1,5 @@
+experiment_group,product,ad_format,network_cnt,network_type,type_network_cnt,status_bucket,request_pv,denominator_request_pv,share
+no_is_adx,demo,interstitial,2,bidding,1,AD_LOADED,7,10,0.7
+no_is_adx,demo,interstitial,2,bidding,1,FAILED_TO_LOAD,3,10,0.3
+have_is_adx,demo,interstitial,2,bidding,1,AD_LOADED,5,8,0.625
+have_is_adx,demo,interstitial,2,bidding,1,FAILED_TO_LOAD,3,8,0.375
