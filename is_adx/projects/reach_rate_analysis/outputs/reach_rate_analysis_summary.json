@@ -1,0 +1,19 @@
+{
+  "target_user": "40f8e7813d7365ca274e0f47c3f6153b",
+  "group_rows": 6,
+  "timeline_rows": 17240,
+  "top_user": {
+    "user_pseudo_id": "40f8e7813d7365ca274e0f47c3f6153b",
+    "experiment_group": "B",
+    "product": "screw_puzzle",
+    "adslog_request_cnt": 1,
+    "lib_isx_max_request_cnt": 1044,
+    "total_latency_request_cnt": 81,
+    "qualified_latency_request_cnt": 81,
+    "max_request_ratio": 1044.0,
+    "latency_ratio": 1.0,
+    "ratio_gap": -1043.0,
+    "first_request_ts": 1768215474516428,
+    "last_request_ts": 1768215474516428
+  }
+}

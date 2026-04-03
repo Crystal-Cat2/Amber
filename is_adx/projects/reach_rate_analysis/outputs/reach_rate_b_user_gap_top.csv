@@ -1,0 +1,2 @@
+﻿user_pseudo_id,experiment_group,product,adslog_request_cnt,lib_isx_max_request_cnt,total_latency_request_cnt,qualified_latency_request_cnt,max_request_ratio,latency_ratio,ratio_gap,first_request_ts,last_request_ts
+40f8e7813d7365ca274e0f47c3f6153b,B,screw_puzzle,1,1044,81,81,1044.0,1.0,-1043.0,1768215474516428,1768215474516428

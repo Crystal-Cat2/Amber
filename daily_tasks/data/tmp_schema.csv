@@ -1,0 +1,4 @@
+﻿column_name,data_type
+log,"STRUCT<slim STRING, path STRING, source_type STRING, timestamp TIMESTAMP, date DATE, ecpm_precision STRING, bucket_id INT64, channel STRING, ecpm_cny FLOAT64, ip STRING, device_idfv STRING, ts INT64, subchannel STRING, unit_id STRING, user_id STRING, true_adunit_id STRING, extra STRING, scene_id STRING, segment_id INT64, sign STRING, iso_code STRING, device_ifa STRING, datetime TIMESTAMP, app_id STRING, platform STRING, trans_id STRING, ecpm FLOAT64, network_id INT64, package_name STRING, adsource_id STRING>"
+slim_name,STRING
+date,DATE

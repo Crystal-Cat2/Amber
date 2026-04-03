@@ -1,5 +1,18 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Stop",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd D:/Work/Amber && git add -A && git diff --cached --quiet || git commit -m \"snapshot: auto-save\""
+          }
+        ]
+      }
+    ]
   }
 }

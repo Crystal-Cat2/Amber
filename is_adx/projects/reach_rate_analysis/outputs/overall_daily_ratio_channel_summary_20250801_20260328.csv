@@ -1,0 +1,91 @@
+﻿product,ad_format,mapped_channel,hudi_impression_pv,max_impression_pv,hudi_max_rate,impression_delta_pv
+screw_puzzle,interstitial,AppLovin,76870569,82396208,0.9329381881263273,-5525639
+screw_puzzle,interstitial,Google AdMob,53493560,55997053,0.9552924151204886,-2503493
+screw_puzzle,rewarded,AppLovin,38030930,40039378,0.9498381818019251,-2008448
+ios_screw_puzzle,interstitial,AppLovin,41589637,43004141,0.9671077257420396,-1414504
+screw_puzzle,interstitial,Unity Ads,18703410,20004807,0.9349457857803877,-1301397
+screw_puzzle,interstitial,Facebook,34072872,35371882,0.9632756323228716,-1299010
+screw_puzzle,interstitial,Pangle,23559737,24632000,0.9564686992530043,-1072263
+screw_puzzle,interstitial,Moloco,13183772,14183378,0.9295227131364616,-999606
+screw_puzzle,interstitial,InMobi,21289856,22164824,0.9605244778844172,-874968
+screw_puzzle,rewarded,Google AdMob,20595704,21435093,0.9608404311565152,-839389
+screw_puzzle,interstitial,Liftoff Monetize,9204937,9862516,0.9333254313605169,-657579
+screw_puzzle,interstitial,DT Exchange,12340616,12962005,0.9520607344311316,-621389
+screw_puzzle,interstitial,CUSTOM_NETWORK_SDK,7062639,7658061,0.9222489870477657,-595422
+ios_screw_puzzle,rewarded,AppLovin,20508691,21041513,0.9746775814077628,-532822
+screw_puzzle,interstitial,Mintegral,9041336,9524005,0.9493207951906787,-482669
+screw_puzzle,rewarded,Facebook,12168708,12575936,0.9676184738853633,-407228
+screw_puzzle,rewarded,Pangle,6416074,6757792,0.9494334835993768,-341718
+screw_puzzle,rewarded,Moloco,4633735,4955702,0.9350310006533887,-321967
+screw_puzzle,rewarded,Liftoff Monetize,4024688,4321860,0.9312397902754832,-297172
+screw_puzzle,interstitial,Ogury,5847387,6116825,0.9559513309600978,-269438
+screw_puzzle,interstitial,APPLOVIN_EXCHANGE,5485712,5708494,0.9609735947869964,-222782
+screw_puzzle,rewarded,Unity Ads,5063360,5273341,0.9601806520761695,-209981
+screw_puzzle,interstitial,Yandex,2433708,2634679,0.9237208783309087,-200971
+screw_puzzle,interstitial,BidMachine,1725134,1872982,0.9210627758302001,-147848
+screw_puzzle,interstitial,PubMatic,241947,100601,2.4050158547131737,141346
+ios_screw_puzzle,interstitial,Google AdMob,6201944,6335378,0.9789382732964,-133434
+ios_screw_puzzle,interstitial,Moloco,7503458,7633669,0.9829425404743118,-130211
+screw_puzzle,rewarded,InMobi,3796259,3920941,0.9682010007291617,-124682
+ios_screw_puzzle,interstitial,Pangle,8289801,8413632,0.9852820993359348,-123831
+screw_puzzle,interstitial,ironSource,2771143,2888954,0.9592201883449858,-117811
+ios_screw_puzzle,interstitial,Unity Ads,7834484,7949489,0.9855330323747854,-115005
+ios_screw_puzzle,rewarded,Google AdMob,4381429,4486629,0.9765525520385127,-105200
+screw_puzzle,rewarded,CUSTOM_NETWORK_SDK,1308065,1412685,0.9259424429366773,-104620
+screw_puzzle,interstitial,BIGO Ads,1021266,1109377,0.9205761431866715,-88111
+ios_screw_puzzle,rewarded,Liftoff Monetize,3906910,3990893,0.9789563388444641,-83983
+screw_puzzle,rewarded,Mintegral,1397216,1479171,0.9445939651331726,-81955
+ios_screw_puzzle,interstitial,CUSTOM_NETWORK_SDK,3567867,3645090,0.9788145148679457,-77223
+screw_puzzle,rewarded,DT Exchange,1810663,1881806,0.9621942963302275,-71143
+screw_puzzle,interstitial,Amazon Ad Marketplace,1583695,1653239,0.95793469667725,-69544
+ios_screw_puzzle,interstitial,Liftoff Monetize,5189938,5257136,0.987217755066637,-67198
+screw_puzzle,interstitial,Google Ad Manager,1698214,1765077,0.9621189330550451,-66863
+screw_puzzle,rewarded,Amazon Ad Marketplace,1305976,1358110,0.9616128295940682,-52134
+ios_screw_puzzle,rewarded,Moloco,2615962,2667916,0.9805263733940649,-51954
+ios_screw_puzzle,interstitial,DT Exchange,2783708,2834843,0.9819619640311651,-51135
+screw_puzzle,rewarded,BidMachine,621800,672389,0.9247623027741382,-50589
+screw_puzzle,rewarded,ironSource,900280,946298,0.9513704985110398,-46018
+ios_screw_puzzle,rewarded,Pangle,2535664,2571476,0.9860733679801017,-35812
+screw_puzzle,rewarded,Yandex,493575,528909,0.9331945570977238,-35334
+screw_puzzle,rewarded,APPLOVIN_EXCHANGE,861869,892869,0.9652804610754769,-31000
+ios_screw_puzzle,interstitial,Facebook,1651886,1682137,0.9820163280398684,-30251
+ios_screw_puzzle,interstitial,InMobi,1986462,2014731,0.9859688464613886,-28269
+screw_puzzle,interstitial,Chartboost,394474,421392,0.9361212362835555,-26918
+ios_screw_puzzle,rewarded,Mintegral,666807,690891,0.9651406661832329,-24084
+ios_screw_puzzle,interstitial,Mintegral,1811735,1835334,0.9871418499303124,-23599
+ios_screw_puzzle,rewarded,Facebook,1046276,1069455,0.9783263437919314,-23179
+ios_screw_puzzle,interstitial,Ogury,1141658,1164198,0.9806390321921186,-22540
+ios_screw_puzzle,rewarded,CUSTOM_NETWORK_SDK,1689785,1711488,0.9873192216363772,-21703
+screw_puzzle,rewarded,Google Ad Manager,424909,442659,0.9599014139552116,-17750
+ios_screw_puzzle,interstitial,ironSource,990810,1007806,0.9831356431694195,-16996
+screw_puzzle,rewarded,Ogury,475455,491326,0.9676976182819553,-15871
+screw_puzzle,rewarded,BIGO Ads,237203,251598,0.9427857137179151,-14395
+ios_screw_puzzle,interstitial,BidMachine,1305652,1318737,0.9900776273055204,-13085
+ios_screw_puzzle,rewarded,InMobi,495380,507377,0.9763548603898088,-11997
+ios_screw_puzzle,rewarded,DT Exchange,542998,554622,0.9790415814735081,-11624
+ios_screw_puzzle,interstitial,Amazon Ad Marketplace,440574,452181,0.974331075387953,-11607
+ios_screw_puzzle,rewarded,BidMachine,549733,559640,0.9822975484239869,-9907
+ios_screw_puzzle,rewarded,Unity Ads,1580183,1589544,0.9941108896639539,-9361
+screw_puzzle,rewarded,PubMatic,43608,34588,1.260784086966578,9020
+ios_screw_puzzle,rewarded,ironSource,578612,586792,0.9860597963162415,-8180
+ios_screw_puzzle,interstitial,Chartboost,219347,211263,1.0382651008458652,8084
+ios_screw_puzzle,rewarded,Amazon Ad Marketplace,287891,295908,0.9729071197804723,-8017
+ios_screw_puzzle,rewarded,Chartboost,117232,110342,1.0624422250820178,6890
+ios_screw_puzzle,interstitial,HyprMX,59404,54274,1.0945203965066146,5130
+screw_puzzle,rewarded,Chartboost,90490,95218,0.950345522905333,-4728
+ios_screw_puzzle,rewarded,Ogury,162507,167226,0.9717807039575186,-4719
+ios_screw_puzzle,rewarded,APPLOVIN_EXCHANGE,176229,179185,0.983503083405419,-2956
+screw_puzzle,interstitial,LINE,43000,45748,0.9399318002972807,-2748
+ios_screw_puzzle,interstitial,Google Ad Manager,168431,170834,0.985933713429411,-2403
+screw_puzzle,rewarded,LINE,49355,51727,0.954143870705821,-2372
+ios_screw_puzzle,rewarded,HyprMX,451850,449530,1.0051609458768047,2320
+ios_screw_puzzle,interstitial,APPLOVIN_EXCHANGE,822825,820515,1.002815305021846,2310
+ios_screw_puzzle,interstitial,BIGO Ads,200087,201685,0.9920767533530009,-1598
+ios_screw_puzzle,rewarded,BIGO Ads,60035,61036,0.9835998427157743,-1001
+ios_screw_puzzle,rewarded,Google Ad Manager,62263,63259,0.9842552047929939,-996
+ios_screw_puzzle,interstitial,PubMatic,121670,122244,0.9953044730211708,-574
+ios_screw_puzzle,interstitial,LINE,9344,9782,0.9552238805970149,-438
+ios_screw_puzzle,rewarded,PubMatic,13186,13405,0.983662812383439,-219
+ios_screw_puzzle,rewarded,LINE,3839,3978,0.9650578179989945,-139
+screw_puzzle,rewarded,UNMAPPED,6,0,0.0,6
+screw_puzzle,interstitial,UNMAPPED,1,0,0.0,1

@@ -1,0 +1,56 @@
+{
+  "threshold": 0.99,
+  "row_count": 4,
+  "below_expectation": false,
+  "below_expectation_rows": [],
+  "rows_preview": [
+    {
+      "product": "com.takeoffbolts.screw.puzzle",
+      "ad_format": "interstitial",
+      "loaded_request_cnt": 15795194,
+      "matched_filled_request_cnt": 15699445,
+      "unmatched_request_cnt": 95749,
+      "matched_ratio": 0.9939380928148144,
+      "loaded_row_cnt": 15797424,
+      "loaded_row_with_ecpm_source_cnt": 15701658,
+      "non_null_filled_value_ratio": 0.9939378724024879
+    },
+    {
+      "product": "com.takeoffbolts.screw.puzzle",
+      "ad_format": "rewarded",
+      "loaded_request_cnt": 7593418,
+      "matched_filled_request_cnt": 7548661,
+      "unmatched_request_cnt": 44757,
+      "matched_ratio": 0.994105816379396,
+      "loaded_row_cnt": 7594441,
+      "loaded_row_with_ecpm_source_cnt": 7549675,
+      "non_null_filled_value_ratio": 0.9941054252709317
+    },
+    {
+      "product": "ios.takeoffbolts.screw.puzzle",
+      "ad_format": "interstitial",
+      "loaded_request_cnt": 8952430,
+      "matched_filled_request_cnt": 8896743,
+      "unmatched_request_cnt": 55687,
+      "matched_ratio": 0.9937796776964467,
+      "loaded_row_cnt": 9178595,
+      "loaded_row_with_ecpm_source_cnt": 9121674,
+      "non_null_filled_value_ratio": 0.9937969809104771
+    },
+    {
+      "product": "ios.takeoffbolts.screw.puzzle",
+      "ad_format": "rewarded",
+      "loaded_request_cnt": 5077333,
+      "matched_filled_request_cnt": 5045742,
+      "unmatched_request_cnt": 31591,
+      "matched_ratio": 0.9937780326797553,
+      "loaded_row_cnt": 5212945,
+      "loaded_row_with_ecpm_source_cnt": 5180571,
+      "non_null_filled_value_ratio": 0.9937896908561283
+    }
+  ],
+  "audit": {
+    "duplicate_filled_key_cnt": 346692,
+    "duplicate_filled_value_conflict_cnt": 0
+  }
+}

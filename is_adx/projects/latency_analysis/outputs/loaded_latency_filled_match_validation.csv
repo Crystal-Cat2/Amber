@@ -1,0 +1,5 @@
+﻿product,ad_format,loaded_request_cnt,matched_filled_request_cnt,unmatched_request_cnt,matched_ratio,loaded_row_cnt,loaded_row_with_ecpm_source_cnt,non_null_filled_value_ratio
+com.takeoffbolts.screw.puzzle,interstitial,15795194,15699445,95749,0.9939380928148144,15797424,15701658,0.9939378724024879
+com.takeoffbolts.screw.puzzle,rewarded,7593418,7548661,44757,0.994105816379396,7594441,7549675,0.9941054252709317
+ios.takeoffbolts.screw.puzzle,interstitial,8952430,8896743,55687,0.9937796776964467,9178595,9121674,0.9937969809104771
+ios.takeoffbolts.screw.puzzle,rewarded,5077333,5045742,31591,0.9937780326797553,5212945,5180571,0.9937896908561283

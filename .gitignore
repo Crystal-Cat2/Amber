@@ -1,0 +1,32 @@
+# 依赖 & 编译产物
+node_modules/
+__pycache__/
+*.pyc
+
+# 二进制 / 安装包
+*.exe
+
+# 临时产出目录
+output/playwright_smoke/
+git_installer/
+
+# Claude Code 本地配置（含权限等敏感信息）
+.claude/settings.local.json
+
+# 大数据文件（超过 GitHub 50MB 限制的产出）
+**/outputs/*.csv
+**/outputs/*.json
+**/outputs/*.html
+**/outputs/data/*.csv
+**/outputs/data/*.json
+
+# 凭证防御性规则（当前不在仓库内，但防止误拷入）
+*.pem
+*.p12
+*.key
+**/service_account*.json
+**/application_default_credentials.json
+.env
+.env.*
+.lark-cli/
+.gcloud/
