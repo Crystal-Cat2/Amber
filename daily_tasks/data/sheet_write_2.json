@@ -1,0 +1,1 @@
+[["", "GAP", "trigger", "trigger", "show", "show", "show_rate", "show_rate"], ["", "show_rate", "A", "B", "A", "B", "A", "B"], ["TOTAL", {"type": "formula", "text": "=H3/G3-1"}, 149494, 148108, 103496, 121770, {"type": "formula", "text": "=E3/C3"}, {"type": "formula", "text": "=F3/D3"}]]

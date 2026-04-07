@@ -2,15 +2,13 @@
 -- 横轴：LT day (LT0 ~ LT30)，累计值不因中间天无数据而断档
 -- 只算新用户（first_open 在 2/2 ~ 3/8，确保所有用户都能观察到 LT30）
 -- 分组：game_model 2a(A) / 2b(B)
--- hudi 事件直接用 user_properties.game_model 分组
+-- 注意：first_open 事件不携带 game_model，需从 user_engagement 获取分组
 -- MAX 表用 user_id + install_date 范围框定
 
--- 1. 新用户：实验期间 first_open 且有 game_model 2a/2b
-WITH new_users AS (
+-- 1a. 从 user_engagement 获取用户的 game_model 分组
+WITH user_ab AS (
   SELECT
     user_pseudo_id,
-    user_id,
-    MIN(DATE(TIMESTAMP_MICROS(event_timestamp), 'UTC')) AS install_date,
     CASE
       WHEN REGEXP_CONTAINS(
         (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
@@ -20,15 +18,28 @@ WITH new_users AS (
         (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
         r'(^|_)2b($|_)'
       ) THEN 'B'
-    END AS ab_group,
-    MIN(event_timestamp) AS min_ts,
-    MAX(event_timestamp) AS max_ts
+    END AS ab_group
   FROM `transferred.hudi_ods.ios_nuts_sort`
-  WHERE event_date BETWEEN '2026-02-01' AND '2026-03-08'
-    AND event_name = 'first_open'
-  GROUP BY user_pseudo_id, user_id, ab_group
+  WHERE event_date BETWEEN '2026-02-01' AND '2026-04-07'
+    AND event_name = 'user_engagement'
+    AND (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1) IS NOT NULL
+  GROUP BY user_pseudo_id, ab_group
   HAVING ab_group IS NOT NULL
-    AND install_date BETWEEN DATE '2026-02-02' AND DATE '2026-03-08'
+),
+
+-- 1b. 用 first_open 确定 install_date，再关联 user_ab 拿分组
+new_users AS (
+  SELECT
+    fo.user_pseudo_id,
+    fo.user_id,
+    MIN(DATE(TIMESTAMP_MICROS(fo.event_timestamp), 'UTC')) AS install_date,
+    ua.ab_group
+  FROM `transferred.hudi_ods.ios_nuts_sort` AS fo
+  INNER JOIN user_ab AS ua ON fo.user_pseudo_id = ua.user_pseudo_id
+  WHERE fo.event_date BETWEEN '2026-02-01' AND '2026-03-08'
+    AND fo.event_name = 'first_open'
+  GROUP BY fo.user_pseudo_id, fo.user_id, ua.ab_group
+  HAVING install_date BETWEEN DATE '2026-02-02' AND DATE '2026-03-08'
 ),
 
 -- 新用户总数
@@ -38,19 +49,10 @@ new_user_count AS (
   GROUP BY ab_group
 ),
 
--- 2. LT：用户每日活跃，直接用 game_model 分组
+-- 2. LT：用户每日活跃，分组从 new_users 获取
 lt_raw AS (
   SELECT
-    CASE
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2a($|_)'
-      ) THEN 'A'
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2b($|_)'
-      ) THEN 'B'
-    END AS ab_group,
+    nu.ab_group,
     e.user_pseudo_id,
     DATE_DIFF(DATE(TIMESTAMP_MICROS(e.event_timestamp), 'UTC'), nu.install_date, DAY) AS lt_day
   FROM `transferred.hudi_ods.ios_nuts_sort` AS e
@@ -65,19 +67,10 @@ lt_summary AS (
   GROUP BY ab_group, lt_day
 ),
 
--- 3. Hudi 展示量：直接用 game_model 分组
+-- 3. Hudi 展示量：分组从 new_users 获取
 hudi_imp_raw AS (
   SELECT
-    CASE
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2a($|_)'
-      ) THEN 'A'
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2b($|_)'
-      ) THEN 'B'
-    END AS ab_group,
+    nu.ab_group,
     DATE_DIFF(DATE(TIMESTAMP_MICROS(e.event_timestamp), 'UTC'), nu.install_date, DAY) AS lt_day,
     CASE
       WHEN e.event_name LIKE 'interstitial_%' THEN 'interstitial'
@@ -92,19 +85,10 @@ hudi_imp_raw AS (
   GROUP BY ab_group, lt_day, ad_format
 ),
 
--- 4. Hudi 收入：直接用 game_model 分组
+-- 4. Hudi 收入：分组从 new_users 获取
 hudi_rev_raw AS (
   SELECT
-    CASE
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2a($|_)'
-      ) THEN 'A'
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2b($|_)'
-      ) THEN 'B'
-    END AS ab_group,
+    nu.ab_group,
     DATE_DIFF(DATE(TIMESTAMP_MICROS(e.event_timestamp), 'UTC'), nu.install_date, DAY) AS lt_day,
     CASE
       WHEN e.event_name LIKE 'interstitial_%' THEN 'interstitial'

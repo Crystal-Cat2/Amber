@@ -1,0 +1,1 @@
+[["", "GAP", "GAP", "imp", "imp", "rev", "rev", "ecpm", "ecpm"], ["", "rev", "ecpm", "A", "B", "A", "B", "A", "B"], ["TOTAL", {"type": "formula", "text": "=F3/G3-1"}, {"type": "formula", "text": "=H3/I3-1"}, 446795, 460464, 7385, 7031, {"type": "formula", "text": "=F3/D3*1000"}, {"type": "formula", "text": "=G3/E3*1000"}]]
