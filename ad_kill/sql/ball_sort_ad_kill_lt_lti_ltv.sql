@@ -5,10 +5,12 @@
 -- 注意：first_open 事件不携带 game_model，需从 user_engagement 获取分组
 -- MAX 表用 user_id + install_date 范围框定
 
--- 1a. 从 user_engagement 获取用户的 game_model 分组
+-- 1a. 从 user_engagement 获取用户的 game_model 分组 + user_id
+--     first_open 事件不携带 game_model 和 user_id，需从后续事件获取
 WITH user_ab AS (
   SELECT
     user_pseudo_id,
+    MAX(user_id) AS user_id,
     CASE
       WHEN REGEXP_CONTAINS(
         (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
@@ -27,18 +29,18 @@ WITH user_ab AS (
   HAVING ab_group IS NOT NULL
 ),
 
--- 1b. 用 first_open 确定 install_date，再关联 user_ab 拿分组
+-- 1b. 用 first_open 确定 install_date，从 user_ab 拿分组和 user_id
 new_users AS (
   SELECT
     fo.user_pseudo_id,
-    fo.user_id,
+    ua.user_id,
     MIN(DATE(TIMESTAMP_MICROS(fo.event_timestamp), 'UTC')) AS install_date,
     ua.ab_group
   FROM `transferred.hudi_ods.ball_sort` AS fo
   INNER JOIN user_ab AS ua ON fo.user_pseudo_id = ua.user_pseudo_id
   WHERE fo.event_date BETWEEN '2026-01-29' AND '2026-03-08'
     AND fo.event_name = 'first_open'
-  GROUP BY fo.user_pseudo_id, fo.user_id, ua.ab_group
+  GROUP BY fo.user_pseudo_id, ua.user_id, ua.ab_group
   HAVING install_date BETWEEN DATE '2026-01-30' AND DATE '2026-03-08'
 ),
 

@@ -17,6 +17,16 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/Work/Amber/.claude/hooks/open_sql_in_antigravity.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Stop",
         "hooks": [
           {

@@ -18,6 +18,8 @@ def read_csv(filename):
 lt_ball = read_csv('ball_sort_ad_kill_lt_lti_ltv.csv')
 lt_nuts = read_csv('ios_nuts_sort_ad_kill_lt_lti_ltv.csv')
 dau_raw = read_csv('ad_kill_dau_by_game_model.csv')
+level_ball = read_csv('ball_sort_level_survival.csv')
+level_nuts = read_csv('ios_nuts_sort_level_survival.csv')
 
 def parse_float(v):
     if v is None or v == '':
@@ -73,7 +75,26 @@ lt_data = {
 }
 dau_data = build_dau_data(dau_raw)
 
-data_json = json.dumps({'lt': lt_data, 'dau': dau_data}, ensure_ascii=False)
+def build_level_data(rows):
+    result = {}
+    for r in rows:
+        ab = r['ab_group']
+        if ab not in result:
+            result[ab] = []
+        result[ab].append({
+            'level': parse_int(r['level']),
+            'survival_rate': parse_float(r['survival_rate']),
+        })
+    for ab in result:
+        result[ab].sort(key=lambda x: x['level'])
+    return result
+
+level_data = {
+    'ball_sort': build_level_data(level_ball),
+    'ios_nuts_sort': build_level_data(level_nuts),
+}
+
+data_json = json.dumps({'lt': lt_data, 'dau': dau_data, 'level': level_data}, ensure_ascii=False)
 
 # HTML 模板
 html = f'''<!DOCTYPE html>
@@ -107,6 +128,11 @@ PLACEHOLDER_CSS
 <div class="section">
   <h2>DAU 趋势 <span class="hint">日活跃用户数</span></h2>
   <div class="chart-full"><canvas id="chartDAU"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>分关卡流失率 <span class="hint">存活曲线：到达第 N 关的用户占比（LT30 内）</span></h2>
+  <div class="chart-full"><canvas id="chartLevelSurvival"></canvas></div>
 </div>
 
 <div class="section">
@@ -160,6 +186,7 @@ PLACEHOLDER_CSS
       <tr><td>LTI (Lifetime Impressions)</td><td>累计人均广告展示次数。从 LT0 到 LTN 的广告展示总量 / 新用户总数</td></tr>
       <tr><td>LTV (Lifetime Value)</td><td>累计人均广告收入（美元）。从 LT0 到 LTN 的广告收入总量 / 新用户总数</td></tr>
       <tr><td>DAU</td><td>日活跃用户数，按日期统计</td></tr>
+      <tr><td>分关卡流失率</td><td>存活曲线。对 LT30 内留存用户，统计到达第 N 关的用户占比（max_level &ge; N 的用户数 / 有游戏记录的用户总数）</td></tr>
     </table>
     <h3>广告格式</h3>
     <table class="info-table">
@@ -263,22 +290,42 @@ function getDauData(product) {
   return d;
 }
 
-function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent) {
+function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent, opts) {
+  opts = opts || {};
+  const pr = opts.pointRadius != null ? opts.pointRadius : 2;
+  const bw = opts.borderWidth != null ? opts.borderWidth : 2;
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
   const datasets = [];
   if (dataA) datasets.push({
     label: 'A 组', data: dataA, borderColor: COLOR_A, backgroundColor: COLOR_A_BG,
-    borderWidth: 2, pointRadius: 2, tension: 0.3, fill: false,
+    borderWidth: bw, pointRadius: pr, tension: 0.3, fill: false, yAxisID: 'y',
   });
   if (dataB) datasets.push({
     label: 'B 组', data: dataB, borderColor: COLOR_B, backgroundColor: COLOR_B_BG,
-    borderWidth: 2, pointRadius: 2, tension: 0.3, fill: false,
+    borderWidth: bw, pointRadius: pr, tension: 0.3, fill: false, yAxisID: 'y',
   });
+  // GAP line: percent → diff (B-A), value → ratio (B/A - 1)
+  if (dataA && dataB) {
+    const gap = dataA.map((a, i) => {
+      const b = dataB[i];
+      if (a === null || b === null || a === undefined || b === undefined) return null;
+      if (isPercent) return b - a;
+      if (a === 0) return null;
+      return b / a - 1;
+    });
+    datasets.push({
+      label: isPercent ? 'GAP (B-A)' : 'GAP (B/A-1)',
+      data: gap, borderColor: '#FF9800', backgroundColor: 'rgba(255,152,0,0.1)',
+      borderWidth: 1.5, pointRadius: 1.5, tension: 0.3, borderDash: [4, 3],
+      fill: false, yAxisID: 'yGap',
+    });
+  }
   const noData = datasets.length === 0 || datasets.every(ds => ds.data.every(v => v === null));
   if (noData) {
-    datasets.push({ label: '暂无数据', data: labels.map(() => null), borderColor: '#ccc', borderWidth: 1 });
+    datasets.push({ label: '暂无数据', data: labels.map(() => null), borderColor: '#ccc', borderWidth: 1, yAxisID: 'y' });
   }
+  const hasGap = datasets.some(ds => ds.yAxisID === 'yGap');
   charts[canvasId] = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets },
@@ -291,6 +338,7 @@ function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent) {
             label: function(ctx) {
               let v = ctx.parsed.y;
               if (v === null) return ctx.dataset.label + ': N/A';
+              if (ctx.dataset.yAxisID === 'yGap') return ctx.dataset.label + ': ' + (v * 100).toFixed(2) + '%';
               if (isPercent) return ctx.dataset.label + ': ' + (v * 100).toFixed(2) + '%';
               return ctx.dataset.label + ': ' + (v < 1 ? v.toFixed(4) : v.toFixed(2));
             }
@@ -300,6 +348,7 @@ function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent) {
       scales: {
         x: { grid: { display: false }, ticks: { font: { size: 10 } } },
         y: {
+          position: 'left',
           ticks: {
             font: { size: 10 },
             callback: function(v) {
@@ -308,6 +357,16 @@ function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent) {
             }
           },
           title: { display: !!yLabel, text: yLabel || '', font: { size: 11 } }
+        },
+        yGap: {
+          position: 'right',
+          display: hasGap,
+          grid: { drawOnChartArea: false },
+          ticks: {
+            font: { size: 9 }, color: '#FF9800',
+            callback: function(v) { return (v * 100).toFixed(1) + '%'; }
+          },
+          title: { display: hasGap, text: 'GAP', font: { size: 10 }, color: '#FF9800' }
         }
       },
       interaction: { mode: 'index', intersect: false },
@@ -336,6 +395,26 @@ function render() {
     makeLineChart('chartDAU', [], null, null, 'DAU', false);
   }
 
+  // Level Survival
+  const levelData = DATA.level[product];
+  if (levelData) {
+    const levelsA = levelData.A || [];
+    const levelsB = levelData.B || [];
+    const allLevels = [...new Set([
+      ...levelsA.map(d => d.level),
+      ...levelsB.map(d => d.level)
+    ])].sort((a, b) => a - b);
+    const labels = allLevels.map(l => 'L' + l);
+    const mapA = Object.fromEntries(levelsA.map(d => [d.level, d.survival_rate]));
+    const mapB = Object.fromEntries(levelsB.map(d => [d.level, d.survival_rate]));
+    makeLineChart('chartLevelSurvival', labels,
+      allLevels.map(l => mapA[l] ?? null),
+      allLevels.map(l => mapB[l] ?? null),
+      '存活率', true, { pointRadius: 0, borderWidth: 1.5 });
+  } else {
+    makeLineChart('chartLevelSurvival', [], null, null, '存活率', true);
+  }
+
   // Ad metrics grid
   const metrics = [
     { key: 'avg_cum_hudi_lti', prefix: 'hudi_lti' },
@@ -347,13 +426,12 @@ function render() {
   const labels = ltDays.map(d => 'LT' + d);
 
   for (const m of metrics) {
-    const isRevenue = m.key.includes('ltv');
     for (const fmt of formats) {
       const d = getAdMetricData(product, m.key, fmt);
       const id = 'chart_' + m.prefix + '_' + fmt;
       makeLineChart(id, labels,
         d && d.A, d && d.B,
-        '', isRevenue);
+        '', false);
     }
   }
 }
