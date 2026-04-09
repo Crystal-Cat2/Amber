@@ -1,10 +1,14 @@
 #!/bin/bash
-# Hook script: auto-open .sql files in Antigravity after Write/Edit
-# Reads hook stdin JSON, extracts file_path, opens if .sql
+# PostToolUse hook: open .sql in Antigravity after Write/Edit
+# Write: git add to establish baseline; Edit: just open (PreToolUse already staged prev version)
 
-grep -o '"file_path":"[^"]*"' | sed 's/"file_path":"//;s/"$//' | {
-  read -r f
-  if [ -n "$f" ] && echo "$f" | grep -qi '\.sql$'; then
-    powershell -Command "& 'D:\Code\Antigravity\bin\antigravity.cmd' --reuse-window '$f'"
+INPUT=$(cat)
+FILE=$(echo "$INPUT" | grep -o '"file_path" *: *"[^"]*"' | sed 's/.*"file_path" *: *"//;s/"$//')
+TOOL=$(echo "$INPUT" | grep -o '"tool_name" *: *"[^"]*"' | sed 's/.*"tool_name" *: *"//;s/"$//')
+
+if [ -n "$FILE" ] && echo "$FILE" | grep -qi '\.sql$'; then
+  if [ "$TOOL" = "Write" ]; then
+    git add "$FILE"
   fi
-}
+  powershell -Command "& 'D:\Code\Antigravity\bin\antigravity.cmd' --reuse-window '$FILE'"
+fi
