@@ -20,6 +20,9 @@ lt_nuts = read_csv('ios_nuts_sort_ad_kill_lt_lti_ltv.csv')
 dau_raw = read_csv('ad_kill_dau_by_game_model.csv')
 level_ball = read_csv('ball_sort_level_survival.csv')
 level_nuts = read_csv('ios_nuts_sort_level_survival.csv')
+gs_ball = read_csv('ball_sort_ad_kill_lt_game_starts.csv')
+gs_nuts = read_csv('ios_nuts_sort_ad_kill_lt_game_starts.csv')
+daily_gs_raw = read_csv('ad_kill_daily_game_starts.csv')
 
 def parse_float(v):
     if v is None or v == '':
@@ -94,7 +97,52 @@ level_data = {
     'ios_nuts_sort': build_level_data(level_nuts),
 }
 
-data_json = json.dumps({'lt': lt_data, 'dau': dau_data, 'level': level_data}, ensure_ascii=False)
+# 构建 LT game starts 数据: {product: {ab_group: [{lt_day, avg_cum_game_starts}]}}
+def build_gs_lt_data(rows):
+    result = {}
+    for r in rows:
+        ab = r['ab_group']
+        if ab not in result:
+            result[ab] = []
+        result[ab].append({
+            'lt_day': parse_int(r['lt_day']),
+            'avg_cum_game_starts': parse_float(r['avg_cum_game_starts']),
+            'retention_rate': parse_float(r['retention_rate']),
+        })
+    for ab in result:
+        result[ab].sort(key=lambda x: x['lt_day'])
+        # 计算累计 LT = sum(retention_rate) from LT0 to LTN
+        cum = 0
+        for d in result[ab]:
+            rr = d['retention_rate'] if d['retention_rate'] is not None else 0
+            cum += rr
+            d['cum_lt'] = round(cum, 6)
+    return result
+
+gs_lt_data = {
+    'ball_sort': build_gs_lt_data(gs_ball),
+    'ios_nuts_sort': build_gs_lt_data(gs_nuts),
+}
+
+# 构建 daily game starts 数据: {product: {ab_group: [{date, avg_game_starts_per_user}]}}
+def build_daily_gs_data(rows):
+    result = {}
+    for r in rows:
+        prod = r['product']
+        ab = r['ab_group']
+        if prod not in result:
+            result[prod] = {}
+        if ab not in result[prod]:
+            result[prod][ab] = []
+        result[prod][ab].append({
+            'date': r['event_date'],
+            'avg_starts': parse_float(r['avg_game_starts_per_user']),
+        })
+    return result
+
+daily_gs_data = build_daily_gs_data(daily_gs_raw)
+
+data_json = json.dumps({'lt': lt_data, 'dau': dau_data, 'level': level_data, 'gs_lt': gs_lt_data, 'daily_gs': daily_gs_data}, ensure_ascii=False)
 
 # HTML 模板
 html = f'''<!DOCTYPE html>
@@ -117,55 +165,6 @@ PLACEHOLDER_CSS
       <option value="ball_sort">Ball Sort (Android)</option>
       <option value="ios_nuts_sort">iOS Nuts Sort</option>
     </select>
-  </div>
-</div>
-
-<div class="section">
-  <h2>Retention Rate <span class="hint">留存率 = 第N天活跃用户 / 新用户总数</span></h2>
-  <div class="chart-full"><canvas id="chartRetention"></canvas></div>
-</div>
-
-<div class="section">
-  <h2>DAU 趋势 <span class="hint">日活跃用户数</span></h2>
-  <div class="chart-full"><canvas id="chartDAU"></canvas></div>
-</div>
-
-<div class="section">
-  <h2>分关卡流失率 <span class="hint">存活曲线：到达第 N 关的用户占比（LT30 内）</span></h2>
-  <div class="chart-full"><canvas id="chartLevelSurvival"></canvas></div>
-</div>
-
-<div class="section">
-  <h2>广告指标 <span class="hint">累计人均值，按广告格式分列</span></h2>
-  <div class="grid-header">
-    <div class="grid-label"></div>
-    <div class="grid-col-header">Banner<br><span class="hint">横幅广告</span></div>
-    <div class="grid-col-header">Interstitial<br><span class="hint">插屏广告</span></div>
-    <div class="grid-col-header">Rewarded<br><span class="hint">激励视频</span></div>
-  </div>
-  <div class="grid-row">
-    <div class="grid-label">Hudi LTI<br><span class="hint">累计人均展示次数</span></div>
-    <div class="grid-cell"><canvas id="chart_hudi_lti_banner"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_hudi_lti_interstitial"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_hudi_lti_rewarded"></canvas></div>
-  </div>
-  <div class="grid-row">
-    <div class="grid-label">Hudi LTV<br><span class="hint">累计人均收入 ($)</span></div>
-    <div class="grid-cell"><canvas id="chart_hudi_ltv_banner"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_hudi_ltv_interstitial"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_hudi_ltv_rewarded"></canvas></div>
-  </div>
-  <div class="grid-row">
-    <div class="grid-label">MAX LTI<br><span class="hint">累计人均展示次数</span></div>
-    <div class="grid-cell"><canvas id="chart_max_lti_banner"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_max_lti_interstitial"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_max_lti_rewarded"></canvas></div>
-  </div>
-  <div class="grid-row">
-    <div class="grid-label">MAX LTV<br><span class="hint">累计人均收入 ($)</span></div>
-    <div class="grid-cell"><canvas id="chart_max_ltv_banner"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_max_ltv_interstitial"></canvas></div>
-    <div class="grid-cell"><canvas id="chart_max_ltv_rewarded"></canvas></div>
   </div>
 </div>
 
@@ -205,6 +204,101 @@ PLACEHOLDER_CSS
   </div>
 </details>
 
+<div class="conclusion">
+  <h2>📊 实验结论</h2>
+  <h3>Ball Sort (Android) — 样本量 A=1,576,925 / B=1,577,766</h3>
+  <table class="info-table">
+    <tr><th>指标</th><th>A 组</th><th>B 组</th><th>差异</th></tr>
+    <tr><td>LT1 留存</td><td>33.01%</td><td>33.16%</td><td class="highlight">+0.5%</td></tr>
+    <tr><td>LT7 留存</td><td>13.40%</td><td>13.52%</td><td class="highlight">+0.9%</td></tr>
+    <tr><td>LT30 留存</td><td>5.87%</td><td>5.91%</td><td class="highlight">+0.7%</td></tr>
+    <tr><td>LT30 总 LTV (MAX)</td><td>$0.188</td><td>$0.192</td><td class="highlight">+2.1%</td></tr>
+    <tr><td>LT30 Banner LTI (MAX)</td><td>89.1</td><td>93.8</td><td class="highlight">+5.3%</td></tr>
+    <tr><td>LT30 Game Starts</td><td>61.67</td><td>62.82</td><td class="highlight">+1.9%</td></tr>
+  </table>
+  <p>B 组全面优于 A 组，各项指标均有 <span class="highlight-warn">2~5%</span> 的提升，差距较小但方向一致。</p>
+
+  <h3>iOS Nuts Sort — 样本量 A=89,575 / B=88,675</h3>
+  <table class="info-table">
+    <tr><th>指标</th><th>A 组</th><th>B 组</th><th>差异</th></tr>
+    <tr><td>LT1 留存</td><td>24.85%</td><td>26.08%</td><td class="highlight">+5.0%</td></tr>
+    <tr><td>LT7 留存</td><td>8.04%</td><td>8.83%</td><td class="highlight">+9.8%</td></tr>
+    <tr><td>LT30 留存</td><td>2.70%</td><td>3.34%</td><td class="highlight">+23.7%</td></tr>
+    <tr><td>LT30 总 LTV (MAX)</td><td>$0.809</td><td>$0.883</td><td class="highlight">+9.1%</td></tr>
+    <tr><td>LT30 Banner LTI (MAX)</td><td>99.6</td><td>126.3</td><td class="highlight">+26.8%</td></tr>
+    <tr><td>LT30 Game Starts</td><td>27.43</td><td>32.39</td><td class="highlight">+18.1%</td></tr>
+  </table>
+  <p>B 组大幅优于 A 组，留存、LTV、开局次数均有 <span class="highlight">双位数提升</span>。LT30 留存提升 23.7%，Banner LTI 提升 26.8%，效果显著。</p>
+
+  <h3>总结</h3>
+  <p>B 组策略（杀广告后允许用户跳关）在两个产品上均带来正向收益。iOS Nuts Sort 效果尤为突出，留存和 LTV 均有大幅提升。
+  提升的核心驱动力是：允许跳关减少了用户因反复卡关而流失，留存提升带动了更多广告展示和收入。</p>
+</div>
+
+<div class="section">
+  <h2>Retention Rate <span class="hint">留存率 = 第N天活跃用户 / 新用户总数</span></h2>
+  <div class="chart-full"><canvas id="chartRetention"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>DAU 趋势 <span class="hint">日活跃用户数</span></h2>
+  <div class="chart-full"><canvas id="chartDAU"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>分关卡流失率 <span class="hint">存活曲线：到达第 N 关的用户占比（LT30 内）</span></h2>
+  <div class="chart-full"><canvas id="chartLevelSurvival"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>新用户 LT（累计人均生命周期） <span class="hint">LT = SUM(留存率) from LT0 to LTN</span></h2>
+  <div class="chart-full"><canvas id="chartCumLt"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>新用户累计人均开局次数 <span class="hint">LT0~LT30 累计 game_new_start / 新用户总数</span></h2>
+  <div class="chart-full"><canvas id="chartGsLt"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>全部用户分日人均开局次数 <span class="hint">当日 game_new_start / DAU</span></h2>
+  <div class="chart-full"><canvas id="chartDailyGs"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>广告指标 <span class="hint">累计人均值，按广告格式分列</span></h2>
+  <div class="grid-header">
+    <div class="grid-label"></div>
+    <div class="grid-col-header">Banner<br><span class="hint">横幅广告</span></div>
+    <div class="grid-col-header">Interstitial<br><span class="hint">插屏广告</span></div>
+    <div class="grid-col-header">Rewarded<br><span class="hint">激励视频</span></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">Hudi LTI<br><span class="hint">累计人均展示次数</span></div>
+    <div class="grid-cell"><canvas id="chart_hudi_lti_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_hudi_lti_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_hudi_lti_rewarded"></canvas></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">Hudi LTV<br><span class="hint">累计人均收入 ($)</span></div>
+    <div class="grid-cell"><canvas id="chart_hudi_ltv_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_hudi_ltv_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_hudi_ltv_rewarded"></canvas></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">MAX LTI<br><span class="hint">累计人均展示次数</span></div>
+    <div class="grid-cell"><canvas id="chart_max_lti_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_max_lti_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_max_lti_rewarded"></canvas></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">MAX LTV<br><span class="hint">累计人均收入 ($)</span></div>
+    <div class="grid-cell"><canvas id="chart_max_ltv_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_max_ltv_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_max_ltv_rewarded"></canvas></div>
+  </div>
+</div>
+
 <script>
 const DATA = {data_json};
 PLACEHOLDER_JS
@@ -220,7 +314,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .header h1 { font-size: 22px; font-weight: 600; }
 .controls { display: flex; align-items: center; gap: 8px; }
 .controls select { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-.section { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.section { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .section h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
 .hint { font-size: 12px; color: #888; font-weight: 400; }
 .chart-full { width: 100%; max-height: 300px; }
@@ -233,7 +327,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .grid-cell { background: #fafbfc; border-radius: 6px; padding: 4px; }
 .grid-cell canvas { width: 100% !important; height: 180px !important; }
 .grid-row { margin-bottom: 8px; }
-.info-panel { background: #fff; border-radius: 10px; padding: 16px; margin-top: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.info-panel { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .info-panel summary { font-size: 15px; font-weight: 600; cursor: pointer; padding: 4px 0; }
 .info-content { padding-top: 12px; font-size: 13px; line-height: 1.7; }
 .info-content h3 { font-size: 14px; margin: 12px 0 6px; }
@@ -241,6 +335,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .info-table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 .info-table th, .info-table td { border: 1px solid #e0e0e0; padding: 6px 10px; text-align: left; font-size: 13px; }
 .info-table th { background: #f5f6fa; font-weight: 600; }
+.conclusion { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #22c55e; }
+.conclusion h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+.conclusion h3 { font-size: 14px; margin: 16px 0 8px; }
+.conclusion h3:first-child { margin-top: 0; }
+.conclusion p { font-size: 13px; line-height: 1.7; margin: 6px 0; }
+.conclusion .highlight { color: #22c55e; font-weight: 600; }
+.conclusion .highlight-warn { color: #f59e0b; font-weight: 600; }
 '''
 
 # JS
@@ -317,7 +418,7 @@ function makeLineChart(canvasId, labels, dataA, dataB, yLabel, isPercent, opts) 
     datasets.push({
       label: isPercent ? 'GAP (B-A)' : 'GAP (B/A-1)',
       data: gap, borderColor: '#FF9800', backgroundColor: 'rgba(255,152,0,0.1)',
-      borderWidth: 1.5, pointRadius: 1.5, tension: 0.3, borderDash: [4, 3],
+      borderWidth: 1.5, pointRadius: pr > 0 ? 1.5 : 0, tension: 0.3, borderDash: [4, 3],
       fill: false, yAxisID: 'yGap',
     });
   }
@@ -413,6 +514,41 @@ function render() {
       '存活率', true, { pointRadius: 0, borderWidth: 1.5 });
   } else {
     makeLineChart('chartLevelSurvival', [], null, null, '存活率', true);
+  }
+
+  // 新用户 LT（累计人均生命周期）
+  const gsLt = DATA.gs_lt[product];
+  if (gsLt) {
+    const gsLabels = ltDays.map(d => 'LT' + d);
+    const mapLtA = gsLt.A ? Object.fromEntries(gsLt.A.map(d => [d.lt_day, d.cum_lt])) : {};
+    const mapLtB = gsLt.B ? Object.fromEntries(gsLt.B.map(d => [d.lt_day, d.cum_lt])) : {};
+    makeLineChart('chartCumLt', gsLabels,
+      ltDays.map(d => mapLtA[d] ?? null),
+      ltDays.map(d => mapLtB[d] ?? null),
+      'LT (天)', false);
+
+    // 新用户累计人均开局次数
+    const mapA = Object.fromEntries(gsLt.A ? gsLt.A.map(d => [d.lt_day, d.avg_cum_game_starts]) : []);
+    const mapB = Object.fromEntries(gsLt.B ? gsLt.B.map(d => [d.lt_day, d.avg_cum_game_starts]) : []);
+    makeLineChart('chartGsLt', gsLabels,
+      ltDays.map(d => mapA[d] ?? null),
+      ltDays.map(d => mapB[d] ?? null),
+      '累计人均开局', false);
+  } else {
+    makeLineChart('chartCumLt', [], null, null, 'LT (天)', false);
+    makeLineChart('chartGsLt', [], null, null, '累计人均开局', false);
+  }
+
+  // 全部用户分日人均开局次数
+  const dailyGs = DATA.daily_gs[product];
+  if (dailyGs) {
+    const dates = dailyGs.A ? dailyGs.A.map(d => d.date) : (dailyGs.B ? dailyGs.B.map(d => d.date) : []);
+    makeLineChart('chartDailyGs', dates,
+      dailyGs.A ? dailyGs.A.map(d => d.avg_starts) : null,
+      dailyGs.B ? dailyGs.B.map(d => d.avg_starts) : null,
+      '人均开局', false);
+  } else {
+    makeLineChart('chartDailyGs', [], null, null, '人均开局', false);
   }
 
   // Ad metrics grid

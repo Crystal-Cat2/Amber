@@ -12,6 +12,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from google.cloud import bigquery
+except ImportError:  # pragma: no cover - 本地缺依赖时触发
+    bigquery = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL_DIR = ROOT / "sql"
@@ -56,27 +61,39 @@ def run_bq_query(sql_path: Path, csv_path: Path) -> None:
         "--format=csv",
         "--max_rows=1000000",
     ]
-    result = subprocess.run(
-        command,
-        input=sql_text,
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="strict",
-        check=False,
-    )
-    if result.returncode != 0:
+    try:
+        result = subprocess.run(
+            command,
+            input=sql_text,
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="strict",
+            check=False,
+        )
+    except FileNotFoundError:
+        query_to_csv_via_bigquery_client(sql_text, csv_path)
+        return
+
+    if result.returncode == 0:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_path.write_text(result.stdout, encoding="utf-8", newline="")
+        return
+
+    try:
+        query_to_csv_via_bigquery_client(sql_text, csv_path)
+        return
+    except Exception as fallback_error:
         raise RuntimeError(
             "bq query failed.\n"
             f"SQL: {sql_path}\n"
             f"stderr:\n{result.stderr.strip()}\n\n"
+            f"fallback_error:\n{fallback_error}\n\n"
             "Please confirm:\n"
             "1. `gcloud auth login` 或本地 ADC 已完成\n"
-            "2. `bq` CLI 可直接访问目标项目\n"
+            "2. `bq` CLI 或本地 ADC 可直接访问目标项目\n"
             "3. SQL 中引用的表在当前环境可读"
-        )
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    csv_path.write_text(result.stdout, encoding="utf-8", newline="")
+        ) from fallback_error
 
 
 def resolve_bq_command() -> list[str]:
@@ -88,6 +105,22 @@ def resolve_bq_command() -> list[str]:
     if bq_binary:
         return [bq_binary]
     return ["bq.cmd"]
+
+
+def query_to_csv_via_bigquery_client(sql_text: str, csv_path: Path) -> None:
+    """当 bq CLI 不可用时，回退到 Python BigQuery 客户端。"""
+    if bigquery is None:
+        raise ImportError("未安装 google-cloud-bigquery，无法走客户端回退。")
+
+    client = bigquery.Client(project="commercial-adx")
+    rows_iter = client.query(sql_text).result(page_size=50000)
+    field_names = [field.name for field in rows_iter.schema]
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=field_names)
+        writer.writeheader()
+        for row in rows_iter:
+            writer.writerow({field: row.get(field) for field in field_names})
 
 
 def read_csv_rows(csv_path: Path) -> list[dict[str, str]]:
@@ -150,31 +183,31 @@ def build_composition_data(rows: list[dict[str, str]]) -> dict[str, dict[str, di
 
 def _scene_metrics(row: dict[str, str]) -> dict[str, float | int]:
     return {
-        "total_users": parse_int(row.get("total_users")),
-        "long_kill_users": parse_int(row.get("long_kill_users")),
-        "long_kill_ratio": parse_float(row.get("long_kill_ratio")),
-        "short_kill_users": parse_int(row.get("short_kill_users")),
-        "short_kill_ratio": parse_float(row.get("short_kill_ratio")),
-        "any_kill_users": parse_int(row.get("any_kill_users")),
-        "any_kill_ratio": parse_float(row.get("any_kill_ratio")),
+        "level5_dau": parse_int(row.get("level5_dau")),
+        "pv": parse_int(row.get("pv")),
+        "uv": parse_int(row.get("uv")),
+        "uv_ratio": parse_float(row.get("uv_ratio")),
     }
 
 
 def build_scene_data(rows: list[dict[str, str]]) -> dict[str, dict[str, Any]]:
+    """按 product -> scene -> overall/by_user_type -> ab_group 组织数据。"""
     data: dict[str, dict[str, Any]] = {}
     for row in rows:
         product = row.get("product", "")
         view_type = row.get("view_type", "")
         ab_group = row.get("ab_group", "")
         user_type = row.get("user_type", "").lower()
-        if not product or not view_type or not ab_group:
+        scene = row.get("ad_kill_scene", "")
+        if not product or not view_type or not ab_group or not scene:
             continue
 
-        product_bucket = data.setdefault(product, {"overall": {}, "by_user_type": {}})
+        product_bucket = data.setdefault(product, {})
+        scene_bucket = product_bucket.setdefault(scene, {"overall": {}, "by_user_type": {}})
         if view_type == "overall":
-            product_bucket["overall"][ab_group] = _scene_metrics(row)
+            scene_bucket["overall"][ab_group] = _scene_metrics(row)
         elif view_type == "by_user_type":
-            type_bucket = product_bucket["by_user_type"].setdefault(user_type, {})
+            type_bucket = scene_bucket["by_user_type"].setdefault(user_type, {})
             type_bucket[ab_group] = _scene_metrics(row)
     return data
 
@@ -375,6 +408,15 @@ def build_html(payload: dict[str, Any]) -> str:
       gap: 18px;
       align-items: start;
     }}
+    .scene-charts-row {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }}
+    .scene-charts-row .chart-panel canvas {{
+      width: 100% !important;
+      height: 220px !important;
+    }}
     .counts-table {{
       width: 100%;
       border-collapse: collapse;
@@ -411,7 +453,8 @@ def build_html(payload: dict[str, Any]) -> str:
       body {{ padding: 16px; }}
       .hero,
       .chart-grid,
-      .scene-layout {{
+      .scene-layout,
+      .scene-charts-row {{
         grid-template-columns: 1fr;
         display: grid;
       }}
@@ -463,26 +506,30 @@ def build_html(payload: dict[str, Any]) -> str:
 
     <section class="section">
       <h2>ad_kill_scene 分布</h2>
-      <p>上图对比整体与新老用户中的 long / short / any 三类 scene ratio，下方表格保留 counts，便于核对样本规模。</p>
-      <div class="scene-layout">
+      <p>分别展示新增用户和老用户中 long_watch_kill / short_watch_repeat_kill 的占比，确认 A/B 组间 DAU 构成差异。</p>
+      <div class="scene-charts-row">
         <div class="chart-panel">
-          <h3>scene ratio 对比</h3>
-          <canvas id="sceneChart"></canvas>
-          <div id="sceneEmpty" class="empty" hidden>当前产品没有 scene 数据。</div>
+          <h3>新增用户 scene 占比</h3>
+          <canvas id="sceneChartNew"></canvas>
+          <div id="sceneEmptyNew" class="empty" hidden>无数据</div>
         </div>
         <div class="chart-panel">
-          <h3>counts 明细</h3>
-          <div id="countsTableWrap"></div>
+          <h3>老用户 scene 占比</h3>
+          <canvas id="sceneChartOld"></canvas>
+          <div id="sceneEmptyOld" class="empty" hidden>无数据</div>
         </div>
+      </div>
+      <div style="margin-top: 18px;">
+        <div id="sceneTableWrap"></div>
       </div>
     </section>
 
     <section class="section">
       <h2>指标说明</h2>
       <ul class="info-list">
-        <li><strong>新老用户构成</strong>：来自 `ad_kill_dau_user_composition.sql`，按 `product / event_date / ab_group / user_type` 聚合 distinct user。</li>
+        <li><strong>新老用户构成</strong>：来自 `ad_kill_dau_user_composition.sql`，仅统计有 `user_engagement` 事件的用户。</li>
         <li><strong>scene 分布</strong>：来自 `ad_kill_scene_user_analysis.sql`，基于第 5 关 `game_new_start` 事件中的 `ad_kill_scene`。</li>
-        <li><strong>overall</strong>：所有用户整体占比；<strong>by_user_type</strong>：在 `new / old` 两类中分别观察 A/B 差异。</li>
+        <li><strong>long_watch_kill</strong>：杀广告时 time_to_kill &ge; 10s；<strong>short_watch_repeat_kill</strong>：同关卡累计杀广告 &ge; 2 次。两者互斥。</li>
       </ul>
     </section>
   </div>
@@ -527,22 +574,6 @@ def build_html(payload: dict[str, Any]) -> str:
       }});
     }}
 
-    function getSceneSeries(product) {{
-      const scene = DATA.scene[product] || {{ overall: {{}}, by_user_type: {{}} }};
-      const groups = [];
-      const overallA = scene.overall.A;
-      const overallB = scene.overall.B;
-      if (overallA || overallB) {{
-        groups.push({{ key: 'overall', label: 'overall', A: overallA || {{}}, B: overallB || {{}} }});
-      }}
-      ['new', 'old'].forEach((userType) => {{
-        const typeBucket = scene.by_user_type[userType] || {{}};
-        if (typeBucket.A || typeBucket.B) {{
-          groups.push({{ key: userType, label: userType, A: typeBucket.A || {{}}, B: typeBucket.B || {{}} }});
-        }}
-      }});
-      return groups;
-    }}
 
     function renderMeta() {{
       document.getElementById('metaSource').textContent = DATA.sources.table;
@@ -553,32 +584,37 @@ def build_html(payload: dict[str, Any]) -> str:
 
     function renderSummary(product) {{
       const rows = getCompositionRows(product);
-      const sceneGroups = getSceneSeries(product);
-      const totalA = rows.reduce((sum, row) => sum + Number(row.A.total_dau || 0), 0);
-      const totalB = rows.reduce((sum, row) => sum + Number(row.B.total_dau || 0), 0);
-      const latest = rows.length ? rows[rows.length - 1] : null;
-      const overall = sceneGroups.find((item) => item.key === 'overall');
+      const scene = DATA.scene[product] || {{}};
+      // 优先用周期去重行
+      const totalRow = rows.find((r) => r.date === 'total');
+      const periodA = totalRow ? totalRow.A.total_dau : 0;
+      const periodB = totalRow ? totalRow.B.total_dau : 0;
+      const latest = rows.filter((r) => r.date !== 'total');
+      const latestDate = latest.length ? latest[latest.length - 1].date : '无日期数据';
+      // scene: long_watch_kill overall B uv_ratio
+      const longScene = scene['long_watch_kill'] || {{ overall: {{}} }};
+      const longBRatio = (longScene.overall.B || {{}}).uv_ratio || 0;
       const summaryGrid = document.getElementById('summaryGrid');
       const cards = [
         {{
-          title: 'A 组总 DAU',
-          value: formatInt(totalA),
-          note: latest ? '最新日期 ' + latest.date : '无日期数据',
+          title: 'A 组周期去重 UV',
+          value: formatInt(periodA),
+          note: '最新日期 ' + latestDate,
         }},
         {{
-          title: 'B 组总 DAU',
-          value: formatInt(totalB),
-          note: latest ? '最新日期 ' + latest.date : '无日期数据',
+          title: 'B 组周期去重 UV',
+          value: formatInt(periodB),
+          note: '最新日期 ' + latestDate,
         }},
         {{
           title: 'B - A 总量差',
-          value: formatInt(totalB - totalA),
+          value: formatInt(periodB - periodA),
           note: '用于判断组间规模是否偏移',
         }},
         {{
-          title: 'scene any 占比',
-          value: overall ? formatPct(overall.B.any_kill_ratio || overall.A.any_kill_ratio || 0) : '0.0%',
-          note: overall ? '默认展示 B 组；若缺失则回落到 A 组' : '无 scene 数据',
+          title: 'scene long 占比 (B)',
+          value: formatPct(longBRatio),
+          note: longBRatio ? 'B 组 long_watch_kill UV 占第5关 DAU' : '无 scene 数据',
         }},
       ];
       summaryGrid.innerHTML = cards.map((card) => `
@@ -591,7 +627,8 @@ def build_html(payload: dict[str, Any]) -> str:
     }}
 
     function renderComposition(product) {{
-      const rows = getCompositionRows(product);
+      const allRows = getCompositionRows(product);
+      const rows = allRows.filter((r) => r.date !== 'total');
       const empty = rows.length === 0;
       document.getElementById('compositionEmpty').hidden = !empty;
       document.getElementById('dauEmpty').hidden = !empty;
@@ -684,91 +721,122 @@ def build_html(payload: dict[str, Any]) -> str:
     }}
 
     function renderScene(product) {{
-      const sceneGroups = getSceneSeries(product);
-      const empty = sceneGroups.length === 0;
-      document.getElementById('sceneEmpty').hidden = !empty;
-      destroyChart('sceneChart');
-      if (empty) {{
-        document.getElementById('countsTableWrap').innerHTML = '<div class="empty">当前产品没有 scene 明细。</div>';
-        return;
+      const scene = DATA.scene[product] || {{}};
+      const sceneNames = Object.keys(scene).filter((s) => s !== 'none').sort();
+
+      destroyChart('sceneChartNew');
+      destroyChart('sceneChartOld');
+
+      const hasData = sceneNames.length > 0;
+      document.getElementById('sceneEmptyNew').hidden = hasData;
+      document.getElementById('sceneEmptyOld').hidden = hasData;
+
+      if (hasData) {{
+        // 新用户: 每个 scene 的 uv_ratio (A vs B)
+        const newRatioA = sceneNames.map((s) => Number(((scene[s].by_user_type['new'] || {{}}).A || {{}}).uv_ratio || 0));
+        const newRatioB = sceneNames.map((s) => Number(((scene[s].by_user_type['new'] || {{}}).B || {{}}).uv_ratio || 0));
+        const newCtx = document.getElementById('sceneChartNew');
+        chartStore.sceneChartNew = new Chart(newCtx, {{
+          type: 'bar',
+          data: {{
+            labels: sceneNames,
+            datasets: [
+              {{ label: 'A 组', data: newRatioA, backgroundColor: COLOR_A_LIGHT }},
+              {{ label: 'B 组', data: newRatioB, backgroundColor: COLOR_B_LIGHT }},
+            ],
+          }},
+          options: {{
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {{ x: {{ beginAtZero: true, ticks: {{ callback: (v) => (Number(v) * 100).toFixed(1) + '%' }} }} }},
+            plugins: {{ tooltip: {{ callbacks: {{ label: (ctx) => `${{ctx.dataset.label}}: ${{formatPct(ctx.parsed.x)}}` }} }} }},
+          }},
+        }});
+
+        // 老用户
+        const oldRatioA = sceneNames.map((s) => Number(((scene[s].by_user_type['old'] || {{}}).A || {{}}).uv_ratio || 0));
+        const oldRatioB = sceneNames.map((s) => Number(((scene[s].by_user_type['old'] || {{}}).B || {{}}).uv_ratio || 0));
+        const oldCtx = document.getElementById('sceneChartOld');
+        chartStore.sceneChartOld = new Chart(oldCtx, {{
+          type: 'bar',
+          data: {{
+            labels: sceneNames,
+            datasets: [
+              {{ label: 'A 组', data: oldRatioA, backgroundColor: COLOR_A_LIGHT }},
+              {{ label: 'B 组', data: oldRatioB, backgroundColor: COLOR_B_LIGHT }},
+            ],
+          }},
+          options: {{
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {{ x: {{ beginAtZero: true, ticks: {{ callback: (v) => (Number(v) * 100).toFixed(1) + '%' }} }} }},
+            plugins: {{ tooltip: {{ callbacks: {{ label: (ctx) => `${{ctx.dataset.label}}: ${{formatPct(ctx.parsed.x)}}` }} }} }},
+          }},
+        }});
       }}
 
-      const labels = [];
-      const aValues = [];
-      const bValues = [];
-      const metricKeys = [
-        ['long_kill_ratio', 'long'],
-        ['short_kill_ratio', 'short'],
-        ['any_kill_ratio', 'any'],
-      ];
-      sceneGroups.forEach((group) => {{
-        metricKeys.forEach(([key, metricLabel]) => {{
-          labels.push(`${{group.label}} · ${{metricLabel}}`);
-          aValues.push(Number(group.A[key] || 0));
-          bValues.push(Number(group.B[key] || 0));
-        }});
+      // 表格：每个 scene 的新老用户 PV / UV / UV占比
+      const gap = (a, b) => {{
+        const diff = Number(b || 0) - Number(a || 0);
+        return (diff >= 0 ? '+' : '') + (diff * 100).toFixed(2) + 'pp';
+      }};
+      const m = (obj) => obj || {{ level5_dau: 0, pv: 0, uv: 0, uv_ratio: 0 }};
+      const tableRows = sceneNames.map((s) => {{
+        const newA = m((scene[s].by_user_type['new'] || {{}}).A);
+        const newB = m((scene[s].by_user_type['new'] || {{}}).B);
+        const oldA = m((scene[s].by_user_type['old'] || {{}}).A);
+        const oldB = m((scene[s].by_user_type['old'] || {{}}).B);
+        return `<tr>
+          <td>${{s}}</td>
+          <td>${{formatInt(newA.pv)}}</td>
+          <td>${{formatInt(newA.uv)}} (${{formatPct(newA.uv_ratio)}})</td>
+          <td>${{formatInt(newB.pv)}}</td>
+          <td>${{formatInt(newB.uv)}} (${{formatPct(newB.uv_ratio)}})</td>
+          <td>${{gap(newA.uv_ratio, newB.uv_ratio)}}</td>
+          <td>${{formatInt(oldA.pv)}}</td>
+          <td>${{formatInt(oldA.uv)}} (${{formatPct(oldA.uv_ratio)}})</td>
+          <td>${{formatInt(oldB.pv)}}</td>
+          <td>${{formatInt(oldB.uv)}} (${{formatPct(oldB.uv_ratio)}})</td>
+          <td>${{gap(oldA.uv_ratio, oldB.uv_ratio)}}</td>
+        </tr>`;
       }});
-
-      const sceneCtx = document.getElementById('sceneChart');
-      chartStore.sceneChart = new Chart(sceneCtx, {{
-        type: 'bar',
-        data: {{
-          labels,
-          datasets: [
-            {{ label: 'A 组', data: aValues, backgroundColor: COLOR_A_LIGHT }},
-            {{ label: 'B 组', data: bValues, backgroundColor: COLOR_B_LIGHT }},
-          ],
-        }},
-        options: {{
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {{
-            y: {{
-              beginAtZero: true,
-              ticks: {{
-                callback: (value) => (Number(value) * 100).toFixed(0) + '%'
-              }}
-            }}
-          }},
-          plugins: {{
-            tooltip: {{
-              callbacks: {{
-                label: (ctx) => `${{ctx.dataset.label}}: ${{formatPct(ctx.parsed.y)}}`
-              }}
-            }}
-          }}
-        }},
-      }});
-
-      const rows = [];
-      sceneGroups.forEach((group) => {{
-        ['A', 'B'].forEach((abGroup) => {{
-          const metrics = group[abGroup] || {{}};
-          rows.push(`
-            <tr>
-              <td>${{group.label}}</td>
-              <td>${{abGroup}}</td>
-              <td>${{formatInt(metrics.total_users || 0)}}</td>
-              <td>${{formatInt(metrics.long_kill_users || 0)}}</td>
-              <td>${{formatInt(metrics.short_kill_users || 0)}}</td>
-              <td>${{formatInt(metrics.any_kill_users || 0)}}</td>
-            </tr>
-          `);
-        }});
-      }});
-      document.getElementById('countsTableWrap').innerHTML = `
+      // 第5关 DAU 行
+      const firstScene = sceneNames[0] || '';
+      const dauNewA = firstScene ? formatInt(m((scene[firstScene].by_user_type['new'] || {{}}).A).level5_dau) : '-';
+      const dauNewB = firstScene ? formatInt(m((scene[firstScene].by_user_type['new'] || {{}}).B).level5_dau) : '-';
+      const dauOldA = firstScene ? formatInt(m((scene[firstScene].by_user_type['old'] || {{}}).A).level5_dau) : '-';
+      const dauOldB = firstScene ? formatInt(m((scene[firstScene].by_user_type['old'] || {{}}).B).level5_dau) : '-';
+      document.getElementById('sceneTableWrap').innerHTML = `
         <table class="counts-table">
           <thead>
             <tr>
-              <th>view</th>
-              <th>ab</th>
-              <th>total_users</th>
-              <th>long</th>
-              <th>short</th>
-              <th>any</th>
+              <th rowspan="2">scene</th>
+              <th colspan="3">新用户</th>
+              <th colspan="2"></th>
+              <th colspan="3">老用户</th>
+              <th colspan="2"></th>
+            </tr>
+            <tr>
+              <th>A PV</th><th>A UV(占比)</th>
+              <th>B PV</th><th>B UV(占比)</th><th>B-A gap</th>
+              <th>A PV</th><th>A UV(占比)</th>
+              <th>B PV</th><th>B UV(占比)</th><th>B-A gap</th>
             </tr>
           </thead>
-          <tbody>${{rows.join('')}}</tbody>
+          <tbody>
+            <tr style="color:var(--muted);font-size:12px">
+              <td>第5关 DAU</td>
+              <td colspan="2">${{dauNewA}}</td>
+              <td colspan="2">${{dauNewB}}</td>
+              <td></td>
+              <td colspan="2">${{dauOldA}}</td>
+              <td colspan="2">${{dauOldB}}</td>
+              <td></td>
+            </tr>
+            ${{tableRows.join('')}}
+          </tbody>
         </table>
       `;
     }}

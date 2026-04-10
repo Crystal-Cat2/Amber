@@ -43,7 +43,7 @@ SELECT
 FROM `gpdata-224001.applovin_max.ball_sort_*` AS m
 INNER JOIN user_ab AS ua
   ON m.User_ID = ua.user_id
-  AND DATE(m.`Date`, 'UTC') >= DATE(ua.experiment_date)
+  AND TIMESTAMP(m.`Date`) >= TIMESTAMP_MICROS(ua.experiment_ts)
 WHERE _TABLE_SUFFIX BETWEEN '20260130' AND '20260406'
   AND m.User_ID IS NOT NULL
 GROUP BY event_date, ua.ab_group, ad_format

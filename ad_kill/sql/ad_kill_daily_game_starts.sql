@@ -43,3 +43,40 @@ ios_nuts_sort_events AS (
   WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
     AND event_name IN ('user_engagement', 'game_new_start')
 ),
+combined AS (
+  SELECT * FROM ball_sort_events
+  UNION ALL
+  SELECT * FROM ios_nuts_sort_events
+),
+-- DAU：当日活跃用户数
+daily_dau AS (
+  SELECT
+    product, event_date, ab_group,
+    COUNT(DISTINCT user_pseudo_id) AS dau
+  FROM combined
+  WHERE ab_group IS NOT NULL
+    AND event_name = 'user_engagement'
+  GROUP BY product, event_date, ab_group
+),
+-- 开局次数
+daily_starts AS (
+  SELECT
+    product, event_date, ab_group,
+    COUNT(*) AS game_starts
+  FROM combined
+  WHERE ab_group IS NOT NULL
+    AND event_name = 'game_new_start'
+  GROUP BY product, event_date, ab_group
+)
+
+SELECT
+  d.product,
+  d.event_date,
+  d.ab_group,
+  d.dau,
+  COALESCE(s.game_starts, 0) AS game_starts,
+  SAFE_DIVIDE(COALESCE(s.game_starts, 0), d.dau) AS avg_game_starts_per_user
+FROM daily_dau AS d
+LEFT JOIN daily_starts AS s
+  ON d.product = s.product AND d.event_date = s.event_date AND d.ab_group = s.ab_group
+ORDER BY d.product, d.event_date, d.ab_group;

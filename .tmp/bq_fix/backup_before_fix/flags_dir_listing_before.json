@@ -1,0 +1,142 @@
+[
+  {
+    "path": "argparse_flags.py",
+    "is_dir": false
+  },
+  {
+    "path": "_argument_parser.py",
+    "is_dir": false
+  },
+  {
+    "path": "_argument_parser.pyi",
+    "is_dir": false
+  },
+  {
+    "path": "_defines.py",
+    "is_dir": false
+  },
+  {
+    "path": "_defines.pyi",
+    "is_dir": false
+  },
+  {
+    "path": "_exceptions.py",
+    "is_dir": false
+  },
+  {
+    "path": "_flag.py",
+    "is_dir": false
+  },
+  {
+    "path": "_flag.pyi",
+    "is_dir": false
+  },
+  {
+    "path": "_flagvalues.py",
+    "is_dir": false
+  },
+  {
+    "path": "_flagvalues.pyi",
+    "is_dir": false
+  },
+  {
+    "path": "_helpers.py",
+    "is_dir": false
+  },
+  {
+    "path": "_validators.py",
+    "is_dir": false
+  },
+  {
+    "path": "_validators_classes.py",
+    "is_dir": false
+  },
+  {
+    "path": "__init__.py",
+    "is_dir": false
+  },
+  {
+    "path": "__init__.pyi",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__",
+    "is_dir": true
+  },
+  {
+    "path": "__pycache__\\argparse_flags.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_argument_parser.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_argument_parser.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_defines.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_defines.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_exceptions.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_exceptions.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_flag.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_flag.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_flagvalues.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_flagvalues.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_helpers.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_helpers.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_validators.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_validators.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_validators_classes.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\_validators_classes.cpython-314.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\__init__.cpython-313.pyc",
+    "is_dir": false
+  },
+  {
+    "path": "__pycache__\\__init__.cpython-314.pyc",
+    "is_dir": false
+  }
+]

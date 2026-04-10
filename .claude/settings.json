@@ -9,20 +9,24 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/Work/Amber/.claude/hooks/check_sql_confirmed.py",
+            "command": "python D:/Work/Amber/.claude/hooks/block_unconfirmed_sql.py",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__Bigquery",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Work/Amber/.claude/hooks/block_unconfirmed_sql.py",
             "timeout": 5000
           }
         ]
       },
       {
         "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash D:/Work/Amber/.claude/hooks/stage_sql_before_edit.sh",
-            "timeout": 5000
-          }
-        ]
+        "hooks": []
       }
     ],
     "PostToolUse": [
@@ -31,8 +35,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash D:/Work/Amber/.claude/hooks/open_sql_in_antigravity.sh",
-            "timeout": 600000
+            "command": "bash D:/Work/Amber/.claude/hooks/auto_open_html.sh",
+            "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash D:/Work/Amber/.claude/hooks/commit_sql_after_write.sh",
+            "timeout": 5000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/Work/Amber/.claude/hooks/auto_extract_rules.sh",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash D:/Work/Amber/.claude/hooks/auto_record_errors.sh",
+            "timeout": 10000
           }
         ]
       },

@@ -1,10 +1,9 @@
--- ad_kill 实验 ad_kill_scene 用户占比分析
+-- ad_kill 实验 ad_kill_scene 分析（第5关）
 -- 数据源：commercial-adx.lmh.ad_kill_detail
--- 目的：分析 long_watch_kill / short_watch_repeat_kill 用户在 AB 组的占比差异
---        以及在新老用户中的占比差异
+-- 目的：以第5关去重用户为分母，各 scene 的 PV 及新老用户占比
 
--- 从 game_new_start 事件提取第5关的 ad_kill_scene（限制 level_id=5 取唯一值）
-WITH scene_events AS (
+-- 第5关全量事件（game_new_start, levelid=5）
+WITH level5_events AS (
   SELECT
     product,
     user_pseudo_id,
@@ -20,89 +19,86 @@ WITH scene_events AS (
          WHERE ep.key = 'levelid') = 5
 ),
 
--- 用户级别：第5关的 ad_kill_scene 唯一分类
-user_scene AS (
+-- 第5关去重 DAU（分母）：按 product/ab_group
+level5_dau AS (
   SELECT
     product,
-    user_pseudo_id,
     ab_group,
-    user_type,
-    ad_kill_scene
-  FROM (
-    SELECT
-      product,
-      user_pseudo_id,
-      ab_group,
-      user_type,
-      ad_kill_scene,
-      ROW_NUMBER() OVER (
-        PARTITION BY product, user_pseudo_id
-        ORDER BY ad_kill_scene DESC  -- 优先取有值的记录
-      ) AS rn
-    FROM scene_events
-    WHERE ad_kill_scene IS NOT NULL
-  )
-  WHERE rn = 1
+    COUNT(DISTINCT user_pseudo_id) AS dau
+  FROM level5_events
+  GROUP BY product, ab_group
 ),
 
--- 用户标记
-user_scene_flags AS (
-  SELECT
-    product,
-    user_pseudo_id,
-    ab_group,
-    user_type,
-    CASE WHEN ad_kill_scene = 'long_watch_kill' THEN 1 ELSE 0 END AS has_long,
-    CASE WHEN ad_kill_scene = 'short_watch_repeat_kill' THEN 1 ELSE 0 END AS has_short,
-    CASE WHEN ad_kill_scene IN ('long_watch_kill', 'short_watch_repeat_kill') THEN 1 ELSE 0 END AS has_any
-  FROM user_scene
-),
-
--- 按 product/ab_group/user_type 汇总
-scene_summary AS (
+-- 第5关去重 DAU 按 user_type
+level5_dau_by_type AS (
   SELECT
     product,
     ab_group,
     user_type,
-    COUNT(*) AS total_users,
-    SUM(has_long) AS long_kill_users,
-    SUM(has_short) AS short_kill_users,
-    SUM(has_any) AS any_kill_users
-  FROM user_scene_flags
+    COUNT(DISTINCT user_pseudo_id) AS dau
+  FROM level5_events
   GROUP BY product, ab_group, user_type
+),
+
+-- 每个 scene 的 PV（事件次数）和 UV（去重用户）
+scene_pv AS (
+  SELECT
+    product,
+    ab_group,
+    ad_kill_scene,
+    COUNT(*) AS pv,
+    COUNT(DISTINCT user_pseudo_id) AS uv
+  FROM level5_events
+  WHERE ad_kill_scene IS NOT NULL
+  GROUP BY product, ab_group, ad_kill_scene
+),
+
+-- 每个 scene 按新老用户的 PV 和 UV
+scene_by_type AS (
+  SELECT
+    product,
+    ab_group,
+    ad_kill_scene,
+    user_type,
+    COUNT(*) AS pv,
+    COUNT(DISTINCT user_pseudo_id) AS uv
+  FROM level5_events
+  WHERE ad_kill_scene IS NOT NULL
+  GROUP BY product, ab_group, ad_kill_scene, user_type
 )
 
--- Part 1: 整体占比（不分新老）
+-- Part 1: 整体（不分新老）—— scene PV/UV 占第5关 DAU 的比例
 SELECT
   'overall' AS view_type,
-  product,
-  ab_group,
+  s.product,
+  s.ab_group,
   CAST(NULL AS STRING) AS user_type,
-  SUM(total_users) AS total_users,
-  SUM(long_kill_users) AS long_kill_users,
-  ROUND(SAFE_DIVIDE(SUM(long_kill_users), SUM(total_users)), 4) AS long_kill_ratio,
-  SUM(short_kill_users) AS short_kill_users,
-  ROUND(SAFE_DIVIDE(SUM(short_kill_users), SUM(total_users)), 4) AS short_kill_ratio,
-  SUM(any_kill_users) AS any_kill_users,
-  ROUND(SAFE_DIVIDE(SUM(any_kill_users), SUM(total_users)), 4) AS any_kill_ratio
-FROM scene_summary
-GROUP BY product, ab_group
+  s.ad_kill_scene,
+  d.dau AS level5_dau,
+  s.pv,
+  s.uv,
+  ROUND(SAFE_DIVIDE(s.uv, d.dau), 4) AS uv_ratio
+FROM scene_pv s
+JOIN level5_dau d
+  ON s.product = d.product AND s.ab_group = d.ab_group
 
 UNION ALL
 
--- Part 2: 按新老用户拆分
+-- Part 2: 按新老用户 —— 每个 scene 内新老用户 PV/UV
 SELECT
   'by_user_type' AS view_type,
-  product,
-  ab_group,
-  user_type,
-  total_users,
-  long_kill_users,
-  ROUND(SAFE_DIVIDE(long_kill_users, total_users), 4) AS long_kill_ratio,
-  short_kill_users,
-  ROUND(SAFE_DIVIDE(short_kill_users, total_users), 4) AS short_kill_ratio,
-  any_kill_users,
-  ROUND(SAFE_DIVIDE(any_kill_users, total_users), 4) AS any_kill_ratio
-FROM scene_summary
+  st.product,
+  st.ab_group,
+  st.user_type,
+  st.ad_kill_scene,
+  dt.dau AS level5_dau,
+  st.pv,
+  st.uv,
+  ROUND(SAFE_DIVIDE(st.uv, dt.dau), 4) AS uv_ratio
+FROM scene_by_type st
+JOIN level5_dau_by_type dt
+  ON st.product = dt.product
+  AND st.ab_group = dt.ab_group
+  AND st.user_type = dt.user_type
 
-ORDER BY product, view_type, ab_group, user_type;
+ORDER BY product, ad_kill_scene, view_type, ab_group, user_type;

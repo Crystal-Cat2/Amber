@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import types
 from pathlib import Path
 import shutil
 import unittest
@@ -149,6 +150,32 @@ class UserDistributionDashboardTests(unittest.TestCase):
             command = module.resolve_bq_command()
 
         self.assertEqual(command, [bq_cmd])
+
+    def test_run_bq_query_falls_back_to_bigquery_client_when_cli_is_broken(self) -> None:
+        """当 bq CLI 在当前环境依赖损坏时，应自动回退到 Python BigQuery 客户端。"""
+        module = load_module()
+        with WorkspaceTempDir("client_fallback") as temp_dir:
+            sql_path = temp_dir / "demo.sql"
+            csv_path = temp_dir / "demo.csv"
+            sql_path.write_text("select 1 as ok", encoding="utf-8")
+
+            broken_result = types.SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="AttributeError: module 'absl.flags' has no attribute 'FLAGS'",
+            )
+            with mock.patch.object(module.subprocess, "run", return_value=broken_result):
+                with mock.patch.object(
+                    module,
+                    "query_to_csv_via_bigquery_client",
+                    side_effect=lambda sql_text, out_path: out_path.write_text(
+                        "ok\n1\n", encoding="utf-8"
+                    ),
+                ) as client_fallback:
+                    module.run_bq_query(sql_path, csv_path)
+
+            client_fallback.assert_called_once()
+            self.assertEqual(csv_path.read_text(encoding="utf-8"), "ok\n1\n")
 
     def test_main_skip_query_writes_single_html(self) -> None:
         """跳过查询时应直接从 CSV 渲染独立 HTML。"""

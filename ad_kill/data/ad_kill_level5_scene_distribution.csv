@@ -1,0 +1,17 @@
+product,ab_group,ad_kill_scene,level5_dau,pv,uv,uv_ratio
+ball_sort,A,long_watch_kill,2534726,620298,191101,0.0754
+ball_sort,A,no_scene,2534726,141330,63612,0.0251
+ball_sort,A,none,2534726,4729990,2267697,0.8947
+ball_sort,A,short_watch_repeat_kill,2534726,75873,12316,0.0049
+ball_sort,B,long_watch_kill,2533852,734221,236429,0.0933
+ball_sort,B,no_scene,2533852,141202,63313,0.025
+ball_sort,B,none,2533852,4532090,2223038,0.8773
+ball_sort,B,short_watch_repeat_kill,2533852,49600,11072,0.0044
+ios_nuts_sort,A,long_watch_kill,229283,179878,30847,0.1345
+ios_nuts_sort,A,no_scene,229283,15325,4802,0.0209
+ios_nuts_sort,A,none,229283,461118,187800,0.8191
+ios_nuts_sort,A,short_watch_repeat_kill,229283,71525,5834,0.0254
+ios_nuts_sort,B,long_watch_kill,229183,158819,38077,0.1661
+ios_nuts_sort,B,no_scene,229183,15053,4686,0.0204
+ios_nuts_sort,B,none,229183,398517,181425,0.7916
+ios_nuts_sort,B,short_watch_repeat_kill,229183,31566,4995,0.0218
