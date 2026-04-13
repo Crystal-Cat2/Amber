@@ -170,4 +170,19 @@ SELECT 'time_to_kill' AS metric, product, ab_group,
   ttk_bucket AS bucket, event_count AS cnt, event_ratio AS ratio
 FROM ttk_distribution
 
+UNION ALL
+
+-- Part 3: 平均开局次数（原始 vs 修正）
+SELECT 'avg_start_count' AS metric, product, ab_group,
+  'original' AS bucket, COUNT(*) AS cnt, ROUND(AVG(original_start_count), 4) AS ratio
+FROM adjusted_start
+GROUP BY product, ab_group
+
+UNION ALL
+
+SELECT 'avg_start_count' AS metric, product, ab_group,
+  'adjusted' AS bucket, COUNT(*) AS cnt, ROUND(AVG(adj_start_count), 4) AS ratio
+FROM adjusted_start
+GROUP BY product, ab_group
+
 ORDER BY metric, product, ab_group, bucket;
