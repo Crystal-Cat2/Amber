@@ -1,7 +1,0 @@
-{
-  "ok": false,
-  "error": {
-    "type": "auth",
-    "message": "device authorization failed: Device authorization failed: The request is missing a required parameter: client_secret."
-  }
-}

@@ -649,10 +649,10 @@ def build_html(payload: dict[str, Any]) -> str:
         data: {{
           labels,
           datasets: [
-            {{ label: 'A', data: rows.map((row) => row.A.new_ratio), backgroundColor: COLOR_NEW_A, stack: 'A' }},
-            {{ label: 'A', data: rows.map((row) => row.A.old_ratio), backgroundColor: COLOR_OLD_A, stack: 'A' }},
-            {{ label: 'B', data: rows.map((row) => row.B.new_ratio), backgroundColor: COLOR_NEW_B, stack: 'B' }},
-            {{ label: 'B', data: rows.map((row) => row.B.old_ratio), backgroundColor: COLOR_OLD_B, stack: 'B' }},
+            {{ label: 'A 新用户', data: rows.map((row) => row.A.new_ratio), backgroundColor: COLOR_NEW_A, stack: 'A' }},
+            {{ label: 'A 老用户', data: rows.map((row) => row.A.old_ratio), backgroundColor: COLOR_OLD_A, stack: 'A' }},
+            {{ label: 'B 新用户', data: rows.map((row) => row.B.new_ratio), backgroundColor: COLOR_NEW_B, stack: 'B' }},
+            {{ label: 'B 老用户', data: rows.map((row) => row.B.old_ratio), backgroundColor: COLOR_OLD_B, stack: 'B' }},
           ],
         }},
         options: {{
@@ -686,7 +686,7 @@ def build_html(payload: dict[str, Any]) -> str:
           labels,
           datasets: [
             {{
-              label: 'A',
+              label: 'A 组 total DAU',
               data: rows.map((row) => row.A.total_dau),
               borderColor: COLOR_A,
               backgroundColor: COLOR_A_LIGHT,
@@ -694,7 +694,7 @@ def build_html(payload: dict[str, Any]) -> str:
               tension: 0.25,
             }},
             {{
-              label: 'B',
+              label: 'B 组 total DAU',
               data: rows.map((row) => row.B.total_dau),
               borderColor: COLOR_B,
               backgroundColor: COLOR_B_LIGHT,
@@ -745,8 +745,8 @@ def build_html(payload: dict[str, Any]) -> str:
           data: {{
             labels: sceneNames,
             datasets: [
-              {{ label: 'A', data: newRatioA, backgroundColor: COLOR_A_LIGHT }},
-              {{ label: 'B', data: newRatioB, backgroundColor: COLOR_B_LIGHT }},
+              {{ label: 'A 组', data: newRatioA, backgroundColor: COLOR_A_LIGHT }},
+              {{ label: 'B 组', data: newRatioB, backgroundColor: COLOR_B_LIGHT }},
             ],
           }},
           options: {{
@@ -767,8 +767,8 @@ def build_html(payload: dict[str, Any]) -> str:
           data: {{
             labels: sceneNames,
             datasets: [
-              {{ label: 'A', data: oldRatioA, backgroundColor: COLOR_A_LIGHT }},
-              {{ label: 'B', data: oldRatioB, backgroundColor: COLOR_B_LIGHT }},
+              {{ label: 'A 组', data: oldRatioA, backgroundColor: COLOR_A_LIGHT }},
+              {{ label: 'B 组', data: oldRatioB, backgroundColor: COLOR_B_LIGHT }},
             ],
           }},
           options: {{

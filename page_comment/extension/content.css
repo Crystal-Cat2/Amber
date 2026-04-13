@@ -1,0 +1,446 @@
+/* PageComment 评论 UI 样式 */
+
+/* 选中文字后的评论按钮 */
+.pc-comment-btn {
+  position: absolute;
+  z-index: 2147483647;
+  background: #4a90d9;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  transition: opacity 0.15s;
+}
+.pc-comment-btn:hover {
+  background: #357abd;
+}
+
+/* 评论输入框容器 */
+.pc-comment-box {
+  position: absolute;
+  z-index: 2147483647;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  padding: 12px;
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.pc-comment-box textarea {
+  width: 100%;
+  min-height: 60px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.pc-comment-box textarea:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+.pc-comment-box-selected {
+  font-size: 12px;
+  color: #666;
+  background: #f5f5f5;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  max-height: 60px;
+  overflow-y: auto;
+  word-break: break-all;
+}
+
+.pc-comment-box-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pc-comment-box-actions button {
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pc-btn-cancel {
+  background: #f0f0f0;
+  color: #333;
+}
+.pc-btn-cancel:hover {
+  background: #e0e0e0;
+}
+.pc-btn-submit {
+  background: #4a90d9;
+  color: #fff;
+}
+.pc-btn-submit:hover {
+  background: #357abd;
+}
+.pc-btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 加载动画 */
+.pc-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ccc;
+  border-top-color: #4a90d9;
+  border-radius: 50%;
+  animation: pc-spin 0.6s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+@keyframes pc-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ========== 侧边栏 ========== */
+.pc-sidebar {
+  position: fixed;
+  top: 0;
+  right: -380px;
+  width: 380px;
+  height: 100vh;
+  background: #fff;
+  border-left: 1px solid #e0e0e0;
+  box-shadow: -2px 0 12px rgba(0,0,0,0.08);
+  z-index: 2147483646;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  transition: right 0.25s ease;
+  display: flex;
+  flex-direction: column;
+}
+.pc-sidebar-open {
+  right: 0;
+}
+
+.pc-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+.pc-sidebar-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+.pc-sidebar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pc-sidebar-new-btn {
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #555;
+}
+.pc-sidebar-new-btn:hover {
+  background: #f5f5f5;
+}
+.pc-sidebar-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+  padding: 0 4px;
+  line-height: 1;
+}
+.pc-sidebar-close:hover {
+  color: #333;
+}
+
+/* 消息区域 */
+.pc-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.pc-sidebar-empty {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 40px 20px;
+}
+
+/* 底部输入区域 */
+.pc-sidebar-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+.pc-chat-input {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: none;
+  font-family: inherit;
+  max-height: 80px;
+  box-sizing: border-box;
+}
+.pc-chat-input:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+.pc-chat-input:disabled {
+  background: #f5f5f5;
+  color: #999;
+}
+.pc-chat-send {
+  background: #4a90d9;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.pc-chat-send:hover {
+  background: #357abd;
+}
+.pc-chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========== 聊天气泡 ========== */
+.pc-chat-msg {
+  margin-bottom: 10px;
+  max-width: 90%;
+  clear: both;
+}
+.pc-chat-user {
+  float: right;
+}
+.pc-chat-user .pc-chat-content {
+  background: #4a90d9;
+  color: #fff;
+  border-radius: 12px 12px 2px 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.pc-chat-assistant {
+  float: left;
+}
+.pc-chat-assistant .pc-chat-content {
+  background: #f0f0f0;
+  color: #333;
+  border-radius: 12px 12px 12px 2px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.pc-chat-system {
+  float: left;
+  max-width: 100%;
+}
+.pc-chat-system .pc-chat-content {
+  background: #fff3cd;
+  color: #856404;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 选中文字上下文标签 */
+.pc-chat-context {
+  font-size: 12px;
+  color: #555;
+  background: #f0f4ff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  border-left: 3px solid #4a90d9;
+  max-height: 48px;
+  overflow: hidden;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.pc-chat-user .pc-chat-context {
+  text-align: right;
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.15);
+  border-left: none;
+  border-right: 3px solid rgba(255,255,255,0.5);
+}
+
+/* 处理中指示器 */
+.pc-chat-typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pc-chat-typing .pc-chat-content {
+  display: none;
+}
+.pc-typing-text {
+  font-size: 12px;
+  color: #888;
+}
+
+/* 编辑标记 */
+.pc-edit-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(0,0,0,0.06);
+  margin-left: 4px;
+}
+
+/* 会话分组 */
+.pc-session-group {
+  margin-bottom: 16px;
+}
+.pc-session-group::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+.pc-session-messages::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+/* 会话 CLI Session ID */
+.pc-session-cli-id {
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+  padding: 2px 0 4px;
+  cursor: pointer;
+  user-select: all;
+  word-break: break-all;
+}
+.pc-session-cli-id:hover {
+  color: #4a90d9;
+}
+
+/* 非活跃会话折叠 */
+.pc-session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.pc-session-collapsed ~ .pc-session-messages,
+.pc-session-collapsed ~ .pc-session-cli-id {
+  display: none;
+}
+.pc-session-expanded .pc-session-collapsed ~ .pc-session-messages,
+.pc-session-expanded .pc-session-collapsed ~ .pc-session-cli-id {
+  display: block;
+}
+.pc-session-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+}
+.pc-session-date {
+  font-size: 11px;
+  color: #aaa;
+  margin-left: auto;
+}
+.pc-session-collapsed::before {
+  content: "▶";
+  font-size: 10px;
+  color: #aaa;
+  transition: transform 0.15s;
+}
+.pc-session-expanded .pc-session-collapsed::before {
+  transform: rotate(90deg);
+}
+
+/* 分隔线 */
+.pc-session-group + .pc-session-group {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+
+/* 侧边栏切换按钮 */
+.pc-sidebar-toggle {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483645;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #4a90d9;
+  color: #fff;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s;
+}
+.pc-sidebar-toggle:hover {
+  transform: scale(1.1);
+}
+
+/* 图表悬停目标 */
+.pc-chart-hover-target {
+  cursor: pointer;
+}
+.pc-chart-hover-target:hover {
+  outline: 2px dashed #4a90d9;
+  outline-offset: 2px;
+}
+
+/* CLI 会话 ID */
+.pc-cli-session-info {
+  font-size: 12px;
+  color: #666;
+  padding: 4px 16px 6px;
+  border-bottom: 1px solid #f0f0f0;
+  font-family: monospace;
+  cursor: pointer;
+  user-select: all;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.pc-cli-session-info:hover {
+  background: #f5f5f5;
+  color: #333;
+}

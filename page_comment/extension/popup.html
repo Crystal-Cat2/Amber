@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 280px; padding: 14px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
+    h3 { margin: 0 0 12px; font-size: 15px; }
+    .status { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot.on { background: #4caf50; }
+    .dot.off { background: #f44336; }
+    label { display: block; margin-bottom: 4px; color: #666; font-size: 12px; }
+    input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    input:focus { outline: none; border-color: #4a90d9; }
+    .row { margin-bottom: 12px; }
+    button { background: #4a90d9; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    button:hover { background: #357abd; }
+    .hint { font-size: 11px; color: #999; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h3>PageComment</h3>
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">检查中...</span>
+  </div>
+  <div class="row">
+    <label>服务器地址</label>
+    <input id="serverUrl" type="text" placeholder="ws://localhost:18080">
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button id="save">保存</button>
+    <button id="reconnect" style="background:#666;">重连</button>
+  </div>
+  <div class="hint">服务器: cd page_comment/server && python server.py</div>
+  <script src="popup.js"></script>
+</body>
+</html>

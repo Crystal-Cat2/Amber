@@ -9,6 +9,7 @@ __pycache__/
 # 临时产出目录
 output/playwright_smoke/
 git_installer/
+.worktrees/
 
 # Claude Code 本地配置（含权限等敏感信息）
 .claude/settings.local.json

@@ -31,6 +31,7 @@ def pi(v):
 # 读取数据
 scene_all = read_csv('ad_kill_level5_scene_distribution.csv')
 survival_raw = read_csv('ad_kill_scene_level_survival.csv')
+kill_count_raw = read_csv('level5_kill_count_distribution.csv')
 
 
 def build_scene_data(rows):
@@ -71,12 +72,32 @@ def build_survival_data(rows):
     return result
 
 
+def build_kill_count_data(rows):
+    """构建 {product: {ab_group: [{kill_count, user_count, user_ratio}]}}"""
+    result = {}
+    for r in rows:
+        prod = r['product']
+        ab = r['ab_group']
+        result.setdefault(prod, {}).setdefault(ab, [])
+        result[prod][ab].append({
+            'kill_count': pi(r['kill_count']),
+            'user_count': pi(r['user_count']),
+            'user_ratio': pf(r['user_ratio']),
+        })
+    for prod in result:
+        for ab in result[prod]:
+            result[prod][ab].sort(key=lambda x: x['kill_count'])
+    return result
+
+
 scene_data = build_scene_data(scene_all)
 survival_data = build_survival_data(survival_raw)
+kill_count_data = build_kill_count_data(kill_count_raw)
 
 data_json = json.dumps({
     'scene': scene_data,
     'survival': survival_data,
+    'killCount': kill_count_data,
 }, ensure_ascii=False)
 
 # ============================================================
@@ -95,8 +116,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .chart-full { width: 100%; max-height: 350px; }
 .chart-full canvas { width: 100% !important; height: 320px !important; }
 .chart-row { display: flex; gap: 16px; flex-wrap: wrap; }
-.chart-half { flex: 1; min-width: 300px; max-height: 300px; }
-.chart-half canvas { width: 100% !important; height: 280px !important; }
+.chart-half { flex: 1; min-width: 300px; max-height: 350px; }
+.chart-half canvas { width: 100% !important; height: 320px !important; }
 .chart-third { flex: 1; min-width: 280px; max-height: 300px; }
 .chart-third canvas { width: 100% !important; height: 280px !important; }
 .cards { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -209,6 +230,84 @@ function renderSceneBar(product) {
         y: {
           beginAtZero: true,
           title: { display: true, text: 'UV 占比' },
+          ticks: { callback: v => (v * 100).toFixed(1) + '%' }
+        }
+      }
+    }
+  });
+}
+
+function renderKillCountBar(product) {
+  const canvasId = 'chartKillCount';
+  const kd = DATA.killCount[product] || {};
+  const labels = [];
+  const dsA = [];
+  const dsB = [];
+  const userCountA = [];
+  const userCountB = [];
+
+  const aData = kd.A || [];
+  const bData = kd.B || [];
+  const bMap = {};
+  bData.forEach(d => { bMap[d.kill_count] = d; });
+
+  let ge4A = { user_ratio: 0, user_count: 0 };
+  let ge4B = { user_ratio: 0, user_count: 0 };
+
+  aData.forEach(d => {
+    if (d.kill_count < 4) {
+      labels.push('杀' + d.kill_count + '次');
+      dsA.push(d.user_ratio);
+      userCountA.push(d.user_count);
+      const bRow = bMap[d.kill_count];
+      dsB.push(bRow ? bRow.user_ratio : 0);
+      userCountB.push(bRow ? bRow.user_count : 0);
+    } else {
+      ge4A.user_ratio += d.user_ratio;
+      ge4A.user_count += d.user_count;
+      const bRow = bMap[d.kill_count];
+      if (bRow) {
+        ge4B.user_ratio += bRow.user_ratio;
+        ge4B.user_count += bRow.user_count;
+      }
+    }
+  });
+
+  if (ge4A.user_count > 0 || ge4B.user_count > 0) {
+    labels.push('杀4次以上');
+    dsA.push(ge4A.user_ratio);
+    userCountA.push(ge4A.user_count);
+    dsB.push(ge4B.user_ratio);
+    userCountB.push(ge4B.user_count);
+  }
+
+  const ctx = document.getElementById(canvasId);
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'A 组', data: dsA, backgroundColor: 'rgba(59,130,246,0.6)', borderColor: COLOR_A, borderWidth: 1, userCountData: userCountA },
+        { label: 'B 组', data: dsB, backgroundColor: 'rgba(239,68,68,0.6)', borderColor: COLOR_B, borderWidth: 1, userCountData: userCountB },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: '第5关杀广告次数分布', font: { size: 14 } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const userCount = ctx.dataset.userCountData[ctx.dataIndex];
+              return ctx.dataset.label + ': ' + (ctx.parsed.y * 100).toFixed(2) + '%  (用户数: ' + fmt(userCount) + ')';
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: '用户占比' },
           ticks: { callback: v => (v * 100).toFixed(1) + '%' }
         }
       }
@@ -383,6 +482,7 @@ function render() {
   const product = getProduct();
   renderDauCards(product);
   renderSceneBar(product);
+  renderKillCountBar(product);
   renderSurvivalByGroup(product);
   renderSurvivalAB(product);
 }
@@ -470,7 +570,8 @@ __CSS__
   <h2>第5关 DAU 概览</h2>
   <div class="cards" id="dauCards"></div>
   <div class="chart-row">
-    <div class="chart-full"><canvas id="chartSceneUV"></canvas></div>
+    <div class="chart-half"><canvas id="chartSceneUV"></canvas></div>
+    <div class="chart-half"><canvas id="chartKillCount"></canvas></div>
   </div>
 </div>
 
