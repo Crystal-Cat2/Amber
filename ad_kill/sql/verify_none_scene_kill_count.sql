@@ -1,24 +1,44 @@
--- 验证：scene=none 的用户在第5关是否有杀广告行为
--- 目的：确认 none 用户的 lib_fullscreen_ad_killed 次数是否为零
+-- 验证：第5关最后一条事件 scene=none 的用户，在该关是否有杀广告行为
+-- 逻辑：取每用户第5关最晚一条 game_new_start/game_win 的 scene，
+--       筛出 scene=none 的用户，统计其第5关 lib_fullscreen_ad_killed 次数
 -- 数据源：commercial-adx.lmh.ad_kill_detail
 
--- 1. 找出第5关 scene=none 的用户
-WITH level5_none_users AS (
-  SELECT DISTINCT
+-- 1. 每用户第5关最后一条事件的 scene
+WITH level5_last_scene AS (
+  SELECT
     product,
     user_pseudo_id,
-    ab_group
-  FROM `commercial-adx.lmh.ad_kill_detail`
-  WHERE event_name = 'game_new_start'
-    AND (SELECT ep.value.int_value
-         FROM UNNEST(event_params.array) AS ep
-         WHERE ep.key = 'levelid') = 5
-    AND (SELECT ep.value.string_value
-         FROM UNNEST(event_params.array) AS ep
-         WHERE ep.key = 'ad_kill_scene') = 'none'
+    ab_group,
+    ad_kill_scene
+  FROM (
+    SELECT
+      product,
+      user_pseudo_id,
+      ab_group,
+      (SELECT ep.value.string_value
+       FROM UNNEST(event_params.array) AS ep
+       WHERE ep.key = 'ad_kill_scene') AS ad_kill_scene,
+      ROW_NUMBER() OVER (
+        PARTITION BY product, user_pseudo_id
+        ORDER BY event_timestamp DESC
+      ) AS rn
+    FROM `commercial-adx.lmh.ad_kill_detail`
+    WHERE event_name IN ('game_new_start', 'game_win')
+      AND (SELECT ep.value.int_value
+           FROM UNNEST(event_params.array) AS ep
+           WHERE ep.key = 'levelid') = 5
+  )
+  WHERE rn = 1
 ),
 
--- 2. 统计这些用户在第5关的 lib_fullscreen_ad_killed 事件次数
+-- 2. 筛出最后一条 scene=none 的用户
+level5_none_users AS (
+  SELECT product, user_pseudo_id, ab_group
+  FROM level5_last_scene
+  WHERE ad_kill_scene = 'none'
+),
+
+-- 3. 这些用户在第5关的 lib_fullscreen_ad_killed 次数
 kill_events AS (
   SELECT
     d.product,
@@ -35,7 +55,7 @@ kill_events AS (
   GROUP BY d.product, d.ab_group, d.user_pseudo_id
 )
 
--- 3. 汇总：none 用户中有多少人有杀广告事件，平均杀了几次
+-- 4. 汇总
 SELECT
   u.product,
   u.ab_group,
