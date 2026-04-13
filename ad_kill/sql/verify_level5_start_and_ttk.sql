@@ -111,11 +111,11 @@ adjusted_start AS (
 
 start_distribution AS (
   SELECT
-    product, ab_group, start_count,
+    product, ab_group, adj_start_count AS start_count,
     COUNT(*) AS user_count,
     ROUND(SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER (PARTITION BY product, ab_group)), 4) AS user_ratio
-  FROM user_start_count
-  GROUP BY product, ab_group, start_count
+  FROM adjusted_start
+  GROUP BY product, ab_group, adj_start_count
 ),
 
 -- Part 2: 每次杀广告的 time_to_kill 分桶
