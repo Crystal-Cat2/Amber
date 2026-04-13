@@ -71,6 +71,44 @@ user_start_count AS (
   GROUP BY ua.product, ua.ab_group, e.user_pseudo_id
 ),
 
+-- B 组幽灵事件用户：第5关 game_new_start 带有触发跳关的 ad_kill_scene
+ghost_users AS (
+  SELECT DISTINCT ua.product, e.user_pseudo_id
+  FROM `transferred.hudi_ods.ball_sort` e
+  INNER JOIN user_ab ua ON e.user_pseudo_id = ua.user_pseudo_id AND ua.product = 'ball_sort'
+  WHERE e.event_date BETWEEN '2026-01-30' AND '2026-04-07'
+    AND e.event_name = 'game_new_start'
+    AND ua.ab_group = 'B'
+    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+    AND (SELECT ep.value.string_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'ad_kill_scene')
+        IN ('long_watch_kill', 'short_watch_repeat_kill')
+
+  UNION ALL
+
+  SELECT DISTINCT ua.product, e.user_pseudo_id
+  FROM `transferred.hudi_ods.ios_nuts_sort` e
+  INNER JOIN user_ab ua ON e.user_pseudo_id = ua.user_pseudo_id AND ua.product = 'ios_nuts_sort'
+  WHERE e.event_date BETWEEN '2026-02-02' AND '2026-04-07'
+    AND e.event_name = 'game_new_start'
+    AND ua.ab_group = 'B'
+    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+    AND (SELECT ep.value.string_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'ad_kill_scene')
+        IN ('long_watch_kill', 'short_watch_repeat_kill')
+),
+
+-- 修正后开局次数：B 组幽灵用户 start_count - 1
+adjusted_start AS (
+  SELECT
+    sc.product, sc.ab_group, sc.user_pseudo_id,
+    sc.start_count AS original_start_count,
+    CASE
+      WHEN sc.ab_group = 'B' AND g.user_pseudo_id IS NOT NULL THEN sc.start_count - 1
+      ELSE sc.start_count
+    END AS adj_start_count
+  FROM user_start_count sc
+  LEFT JOIN ghost_users g ON sc.product = g.product AND sc.user_pseudo_id = g.user_pseudo_id
+),
+
 start_distribution AS (
   SELECT
     product, ab_group, start_count,
