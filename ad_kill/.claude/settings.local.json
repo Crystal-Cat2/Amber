@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Bigquery-Server__query_game_data",
+      "Read(//c/Users/ASUS/.agents/skills/bq-refresh-token/**)",
+      "Bash(python scripts/login.py)",
+      "Bash(python:*)",
+      "Bash(bq query:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "Bigquery-Server"
+  ]
+}

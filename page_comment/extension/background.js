@@ -4,69 +4,129 @@
  */
 
 const DEFAULT_SERVER = "ws://localhost:18080";
-let ws = null;
-let reconnectTimer = null;
-let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
+const TERMINAL_MESSAGE_TYPES = new Set([
+  "result",
+  "history",
+  "session_created",
+  "session_switched",
+  "batch_result",
+  "error",
+]);
 
-// 等待响应的回调 {id: {tabId, type}}
-const pending = new Map();
+const pageContexts = new Map();
 
-// keepalive: 每 20 秒 ping 一次，防止 service worker 被杀
-let keepaliveTimer = null;
+function normalizePageUrl(urlText) {
+  try {
+    const parsed = new URL(urlText || "");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return String(urlText || "").replace(/[?#].*/, "");
+  }
+}
 
-function startKeepalive() {
-  stopKeepalive();
-  keepaliveTimer = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "ping" }));
+function resolvePageIdentity(msg, sender) {
+  if (msg?.page_identity) return String(msg.page_identity);
+  if (msg?.page_key) return String(msg.page_key);
+  if (msg?.data?.page_meta?.page_key) return String(msg.data.page_meta.page_key);
+  if (msg?.data?.page_url) return normalizePageUrl(msg.data.page_url);
+  if (sender?.tab?.url) return normalizePageUrl(sender.tab.url);
+  return "__default__";
+}
+
+function createPageContext(pageIdentity) {
+  return {
+    pageIdentity,
+    ws: null,
+    reconnectTimer: null,
+    reconnectDelay: 1000,
+    keepaliveTimer: null,
+    pending: new Map(),
+    connectPromise: null,
+  };
+}
+
+function getPageContext(pageIdentity) {
+  const key = String(pageIdentity || "__default__");
+  if (!pageContexts.has(key)) {
+    pageContexts.set(key, createPageContext(key));
+  }
+  return pageContexts.get(key);
+}
+
+function startKeepalive(context) {
+  if (globalThis.__PAGE_COMMENT_TEST_MODE) return;
+  stopKeepalive(context);
+  context.keepaliveTimer = setInterval(() => {
+    if (context.ws && context.ws.readyState === WebSocket.OPEN) {
+      context.ws.send(JSON.stringify({ type: "ping" }));
     }
   }, 20000);
 }
 
-function stopKeepalive() {
-  if (keepaliveTimer) {
-    clearInterval(keepaliveTimer);
-    keepaliveTimer = null;
+function stopKeepalive(context) {
+  if (context.keepaliveTimer) {
+    clearInterval(context.keepaliveTimer);
+    context.keepaliveTimer = null;
   }
 }
 
 function getServerUrl() {
   return new Promise((resolve) => {
-    chrome.storage.local.get({ serverUrl: DEFAULT_SERVER }, (r) => resolve(r.serverUrl));
+    chrome.storage.local.get({ serverUrl: DEFAULT_SERVER }, (result) => resolve(result.serverUrl));
   });
 }
 
-async function connect() {
-  if (ws && ws.readyState === WebSocket.OPEN) return ws;
-  if (ws && ws.readyState === WebSocket.CONNECTING) {
-    return new Promise((resolve) => {
-      const orig = ws.onopen;
-      ws.onopen = () => { orig?.(); resolve(ws); };
-      const origErr = ws.onerror;
-      ws.onerror = () => { origErr?.(); resolve(null); };
-    });
-  }
+function broadcastStatus(pageIdentity, connected) {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "connection_status",
+        connected,
+        page_identity: pageIdentity,
+      }).catch(() => {});
+    }
+  });
+}
+
+function scheduleReconnect(context) {
+  if (context.reconnectTimer) return;
+  context.reconnectTimer = setTimeout(() => {
+    context.reconnectTimer = null;
+    context.reconnectDelay = Math.min(context.reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    connect(context.pageIdentity);
+  }, context.reconnectDelay);
+}
+
+async function connect(pageIdentity) {
+  const context = getPageContext(pageIdentity);
+
+  if (context.ws && context.ws.readyState === WebSocket.OPEN) return context.ws;
+  if (context.connectPromise) return context.connectPromise;
 
   const url = await getServerUrl();
-  return new Promise((resolve) => {
+  context.connectPromise = new Promise((resolve) => {
     try {
-      ws = new WebSocket(url);
-    } catch (e) {
-      scheduleReconnect();
+      context.ws = new WebSocket(url);
+    } catch (_error) {
+      scheduleReconnect(context);
+      context.connectPromise = null;
       resolve(null);
       return;
     }
 
-    ws.onopen = () => {
-      console.log("[PageComment] 已连接服务器");
-      reconnectDelay = 1000;
-      startKeepalive();
-      broadcastStatus(true);
-      resolve(ws);
+    context.ws.onopen = () => {
+      console.log("[PageComment] 已连接服务器:", context.pageIdentity);
+      context.reconnectDelay = 1000;
+      startKeepalive(context);
+      broadcastStatus(context.pageIdentity, true);
+      context.connectPromise = null;
+      resolve(context.ws);
     };
 
-    ws.onmessage = (event) => {
+    context.ws.onmessage = (event) => {
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -74,155 +134,171 @@ async function connect() {
         return;
       }
 
-      // pong 不需要转发
       if (msg.type === "pong") return;
 
-      const id = msg.id;
-      const entry = pending.get(id);
+      const entry = context.pending.get(msg.id);
       if (!entry) return;
 
       chrome.tabs.sendMessage(entry.tabId, msg).catch(() => {});
 
-      // 终态消息：清理 pending
-      if (msg.type === "result" || msg.type === "history" || msg.type === "session_created" || msg.type === "error") {
-        pending.delete(id);
+      if (TERMINAL_MESSAGE_TYPES.has(msg.type)) {
+        context.pending.delete(msg.id);
       }
     };
 
-    ws.onclose = () => {
-      console.log("[PageComment] 连接断开");
-      ws = null;
-      stopKeepalive();
-      broadcastStatus(false);
-      // 如果还有 pending 请求，立即重连
-      if (pending.size > 0) {
-        reconnectDelay = 1000;
+    context.ws.onclose = () => {
+      console.log("[PageComment] 连接断开:", context.pageIdentity);
+      context.ws = null;
+      context.connectPromise = null;
+      stopKeepalive(context);
+      broadcastStatus(context.pageIdentity, false);
+      if (context.pending.size > 0) {
+        context.reconnectDelay = 1000;
       }
-      scheduleReconnect();
+      scheduleReconnect(context);
     };
 
-    ws.onerror = () => {
-      ws?.close();
+    context.ws.onerror = () => {
+      context.ws?.close();
+      context.connectPromise = null;
       resolve(null);
     };
 
-    setTimeout(() => resolve(null), 3000);
-  });
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    connect();
-  }, reconnectDelay);
-}
-
-function broadcastStatus(connected) {
-  chrome.tabs.query({}, (tabs) => {
-    for (const tab of tabs) {
-      chrome.tabs.sendMessage(tab.id, { type: "connection_status", connected }).catch(() => {});
+    if (!globalThis.__PAGE_COMMENT_TEST_MODE) {
+      setTimeout(() => {
+        if (context.connectPromise) {
+          context.connectPromise = null;
+          resolve(null);
+        }
+      }, 3000);
     }
   });
+
+  return context.connectPromise;
 }
 
 function generateId() {
   return crypto.randomUUID();
 }
 
-// 监听 content script 消息
+async function sendViaPageContext(message, sender, sendResponse) {
+  const tabId = sender.tab?.id;
+  const pageIdentity = resolvePageIdentity(message, sender);
+  const context = getPageContext(pageIdentity);
+  const connection = await connect(pageIdentity);
+
+  if (!connection || connection.readyState !== WebSocket.OPEN) {
+    sendResponse({ ok: false, error: "未连接到服务器" });
+    return;
+  }
+
+  const id = generateId();
+  context.pending.set(id, { tabId, type: message.type });
+
+  const payload = { ...message, id };
+  connection.send(JSON.stringify(payload));
+  sendResponse({ ok: true, id });
+}
+
+function isAnyContextConnected() {
+  for (const context of pageContexts.values()) {
+    if (context.ws && context.ws.readyState === WebSocket.OPEN) return true;
+  }
+  return false;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "submit_comment") {
-    const tabId = sender.tab?.id;
-
-    (async () => {
-      const conn = await connect();
-      if (!conn || conn.readyState !== WebSocket.OPEN) {
-        sendResponse({ ok: false, error: "未连接到服务器" });
-        return;
-      }
-
-      const id = generateId();
-      pending.set(id, { tabId, type: "comment" });
-
-      conn.send(JSON.stringify({
-        type: "comment",
-        id,
-        data: msg.data,
-      }));
-
-      sendResponse({ ok: true, id });
-    })();
-
+    sendViaPageContext({
+      type: "comment",
+      page_identity: resolvePageIdentity(msg, sender),
+      data: msg.data,
+    }, sender, sendResponse);
     return true;
   }
 
-  // 通用 WebSocket 转发：get_history, new_session
-  if (msg.type === "get_history" || msg.type === "new_session") {
-    const tabId = sender.tab?.id;
-
-    (async () => {
-      const conn = await connect();
-      if (!conn || conn.readyState !== WebSocket.OPEN) {
-        sendResponse({ ok: false, error: "未连接到服务器" });
-        return;
-      }
-
-      const id = generateId();
-      pending.set(id, { tabId, type: msg.type });
-
-      conn.send(JSON.stringify({
-        type: msg.type,
-        id,
-        page_key: msg.page_key,
-        page_url: msg.page_url,
-      }));
-
-      sendResponse({ ok: true, id });
-    })();
-
+  if (msg.type === "submit_interaction_response") {
+    sendViaPageContext({
+      type: "interaction_response",
+      page_identity: resolvePageIdentity(msg, sender),
+      interaction_id: msg.interaction_id,
+      response: msg.response,
+    }, sender, sendResponse);
     return true;
   }
 
-  // 轮询结果（连接断开后重连时用）
+  if (msg.type === "get_history" || msg.type === "new_session"
+      || msg.type === "switch_session" || msg.type === "fork_session") {
+    const payload = { ...msg, page_identity: resolvePageIdentity(msg, sender) };
+    sendViaPageContext(payload, sender, sendResponse);
+    return true;
+  }
+
+  if (msg.type === "submit_batch_comment") {
+    sendViaPageContext({
+      type: "batch_comment",
+      page_identity: resolvePageIdentity(msg, sender),
+      data: msg.data,
+    }, sender, sendResponse);
+    return true;
+  }
+
   if (msg.type === "poll_result") {
-    const tabId = sender.tab?.id;
+    sendViaPageContext({
+      type: "poll_result",
+      page_identity: resolvePageIdentity(msg, sender),
+      comment_id: msg.comment_id,
+    }, sender, sendResponse);
+    return true;
+  }
 
-    (async () => {
-      const conn = await connect();
-      if (!conn || conn.readyState !== WebSocket.OPEN) {
-        sendResponse({ ok: false, error: "未连接到服务器" });
+  if (msg.type === "capture_target_visual") {
+    chrome.tabs.captureVisibleTab(sender.tab?.windowId, { format: "png" }, (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError?.message || "截图失败" });
         return;
       }
-
-      const id = generateId();
-      pending.set(id, { tabId, type: "poll" });
-
-      conn.send(JSON.stringify({
-        type: "poll_result",
-        id,
-        comment_id: msg.comment_id,
-      }));
-
-      sendResponse({ ok: true, id });
-    })();
-
+      sendResponse({ ok: true, data_url: dataUrl });
+    });
     return true;
   }
 
   if (msg.type === "get_status") {
-    sendResponse({ connected: ws && ws.readyState === WebSocket.OPEN });
+    const pageIdentity = msg.page_identity ? String(msg.page_identity) : null;
+    if (!pageIdentity) {
+      sendResponse({ connected: isAnyContextConnected() });
+      return;
+    }
+    const context = pageContexts.get(pageIdentity);
+    sendResponse({ connected: !!(context?.ws && context.ws.readyState === WebSocket.OPEN) });
     return;
   }
 
   if (msg.type === "reconnect") {
-    reconnectDelay = 1000;
-    connect();
+    const pageIdentity = msg.page_identity ? String(msg.page_identity) : null;
+    if (pageIdentity) {
+      const context = getPageContext(pageIdentity);
+      context.reconnectDelay = 1000;
+      if (context.ws && context.ws.readyState === WebSocket.OPEN) {
+        context.ws.close();
+      } else {
+        connect(pageIdentity);
+      }
+    } else {
+      for (const context of pageContexts.values()) {
+        context.reconnectDelay = 1000;
+        if (context.ws && context.ws.readyState === WebSocket.OPEN) {
+          context.ws.close();
+        } else {
+          connect(context.pageIdentity);
+        }
+      }
+    }
     sendResponse({ ok: true });
     return;
   }
 });
 
-// 启动时连接
-connect();
+if (!globalThis.__PAGE_COMMENT_TEST_MODE) {
+  // 按页面懒连接，避免无意义的全局共享连接。
+}

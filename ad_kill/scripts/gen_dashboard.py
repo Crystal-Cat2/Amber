@@ -23,6 +23,8 @@ level_nuts = read_csv('ios_nuts_sort_level_survival.csv')
 gs_ball = read_csv('ball_sort_ad_kill_lt_game_starts.csv')
 gs_nuts = read_csv('ios_nuts_sort_ad_kill_lt_game_starts.csv')
 daily_gs_raw = read_csv('ad_kill_daily_game_starts.csv')
+max_daily_ball = read_csv('ball_sort_ad_kill_max_daily.csv')
+max_daily_nuts = read_csv('ios_nuts_sort_ad_kill_max_daily.csv')
 
 def parse_float(v):
     if v is None or v == '':
@@ -142,7 +144,33 @@ def build_daily_gs_data(rows):
 
 daily_gs_data = build_daily_gs_data(daily_gs_raw)
 
-data_json = json.dumps({'lt': lt_data, 'dau': dau_data, 'level': level_data, 'gs_lt': gs_lt_data, 'daily_gs': daily_gs_data}, ensure_ascii=False)
+# 构建分日广告数据: {product: {ab_group: {ad_format: [{date, impressions, revenue, ecpm}]}}}
+def build_daily_ad_data(rows):
+    result = {}
+    for r in rows:
+        ab = r['ab_group']
+        fmt = r['ad_format']
+        if ab not in result:
+            result[ab] = {}
+        if fmt not in result[ab]:
+            result[ab][fmt] = []
+        impr = parse_int(r['impressions'])
+        rev = parse_float(r['revenue_usd'])
+        ecpm = (rev / impr * 1000) if impr and impr > 0 else None
+        result[ab][fmt].append({
+            'date': r['event_date'],
+            'impressions': impr,
+            'revenue': rev,
+            'ecpm': ecpm,
+        })
+    return result
+
+max_daily_data = {
+    'ball_sort': build_daily_ad_data(max_daily_ball),
+    'ios_nuts_sort': build_daily_ad_data(max_daily_nuts),
+}
+
+data_json = json.dumps({'lt': lt_data, 'dau': dau_data, 'level': level_data, 'gs_lt': gs_lt_data, 'daily_gs': daily_gs_data, 'max_daily': max_daily_data}, ensure_ascii=False)
 
 # HTML 模板
 html = f'''<!DOCTYPE html>
@@ -263,6 +291,34 @@ PLACEHOLDER_CSS
 <div class="section">
   <h2>全部用户分日人均开局次数 <span class="hint">当日 game_new_start / DAU</span></h2>
   <div class="chart-full"><canvas id="chartDailyGs"></canvas></div>
+</div>
+
+<div class="section">
+  <h2>全部用户分日广告指标 <span class="hint">Max 平台每日展示与收入</span></h2>
+  <div class="grid-header">
+    <div class="grid-label"></div>
+    <div class="grid-col-header">Banner<br><span class="hint">横幅广告</span></div>
+    <div class="grid-col-header">Interstitial<br><span class="hint">插屏广告</span></div>
+    <div class="grid-col-header">Rewarded<br><span class="hint">激励视频</span></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">展示次数<br><span class="hint">每日总数</span></div>
+    <div class="grid-cell"><canvas id="chart_daily_impressions_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_impressions_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_impressions_rewarded"></canvas></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">收入 (USD)<br><span class="hint">每日总额</span></div>
+    <div class="grid-cell"><canvas id="chart_daily_revenue_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_revenue_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_revenue_rewarded"></canvas></div>
+  </div>
+  <div class="grid-row">
+    <div class="grid-label">eCPM<br><span class="hint">每千次展示收益</span></div>
+    <div class="grid-cell"><canvas id="chart_daily_ecpm_banner"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_ecpm_interstitial"></canvas></div>
+    <div class="grid-cell"><canvas id="chart_daily_ecpm_rewarded"></canvas></div>
+  </div>
 </div>
 
 <div class="section">
@@ -387,6 +443,12 @@ function getAdMetricData(product, metric, adFormat) {
 
 function getDauData(product) {
   const d = DATA.dau[product];
+  if (!d) return null;
+  return d;
+}
+
+function getDailyAdData(product) {
+  const d = DATA.max_daily[product];
   if (!d) return null;
   return d;
 }
@@ -549,6 +611,65 @@ function render() {
       '人均开局', false);
   } else {
     makeLineChart('chartDailyGs', [], null, null, '人均开局', false);
+  }
+
+  // 全部用户分日广告指标
+  const dailyAd = getDailyAdData(product);
+  if (dailyAd) {
+    const formats = ['banner', 'interstitial', 'rewarded'];
+
+    for (const fmt of formats) {
+      // 收集所有日期
+      const allDates = new Set();
+      if (dailyAd.A && dailyAd.A[fmt]) {
+        dailyAd.A[fmt].forEach(d => allDates.add(d.date));
+      }
+      if (dailyAd.B && dailyAd.B[fmt]) {
+        dailyAd.B[fmt].forEach(d => allDates.add(d.date));
+      }
+      const dates = Array.from(allDates).sort();
+
+      // 构建数据映射
+      const mapA_impr = {};
+      const mapA_rev = {};
+      const mapA_ecpm = {};
+      const mapB_impr = {};
+      const mapB_rev = {};
+      const mapB_ecpm = {};
+
+      if (dailyAd.A && dailyAd.A[fmt]) {
+        dailyAd.A[fmt].forEach(d => {
+          mapA_impr[d.date] = d.impressions;
+          mapA_rev[d.date] = d.revenue;
+          mapA_ecpm[d.date] = d.ecpm;
+        });
+      }
+      if (dailyAd.B && dailyAd.B[fmt]) {
+        dailyAd.B[fmt].forEach(d => {
+          mapB_impr[d.date] = d.impressions;
+          mapB_rev[d.date] = d.revenue;
+          mapB_ecpm[d.date] = d.ecpm;
+        });
+      }
+
+      // 展示次数
+      makeLineChart('chart_daily_impressions_' + fmt, dates,
+        dates.map(d => mapA_impr[d] ?? null),
+        dates.map(d => mapB_impr[d] ?? null),
+        '', false);
+
+      // 收入
+      makeLineChart('chart_daily_revenue_' + fmt, dates,
+        dates.map(d => mapA_rev[d] ?? null),
+        dates.map(d => mapB_rev[d] ?? null),
+        '', false);
+
+      // eCPM
+      makeLineChart('chart_daily_ecpm_' + fmt, dates,
+        dates.map(d => mapA_ecpm[d] ?? null),
+        dates.map(d => mapB_ecpm[d] ?? null),
+        '', false);
+    }
   }
 
   // Ad metrics grid

@@ -4,13 +4,24 @@ import os
 PORT = 18080
 HOST = "localhost"
 AMBER_ROOT = os.environ.get("AMBER_ROOT", "D:/Work/Amber")
+DEFAULT_MODEL_PROVIDER = os.environ.get("DEFAULT_MODEL_PROVIDER", "claude")
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 # Claude CLI 配置
 # 直接用 claude.exe 完整路径，避免 cmd /c 弹出黑窗口。
 # 如需覆盖，可设置环境变量 CLAUDE_CLI。
 CLAUDE_CLI = os.environ.get("CLAUDE_CLI", "").split() or [r"C:\Users\ASUS\.local\bin\claude.exe"]
-CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "180"))
+CODEX_CLI = os.environ.get("CODEX_CLI", "").split() or ["codex"]
+CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "300"))
+
+# Claude CLI 允许自动使用的工具列表（与交互式 CLI 一致：常用工具全部放行）
+CLAUDE_ALLOWED_TOOLS = [
+    t.strip() for t in
+    os.environ.get(
+        "CLAUDE_ALLOWED_TOOLS",
+        "Edit,Write,Read,Glob,Grep,Bash,Agent,NotebookEdit"
+    ).split(",") if t.strip()
+]
 # Windows 上 Claude Code 需要 git-bash
 CLAUDE_CODE_GIT_BASH = os.environ.get(
     "CLAUDE_CODE_GIT_BASH_PATH",

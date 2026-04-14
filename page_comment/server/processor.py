@@ -1,5 +1,6 @@
-"""评论处理: 分类 → Claude CLI (--resume) 直接改文件 → 重生成"""
+"""评论处理: 分类 → CLI (--resume) 直接改文件 → 重生成"""
 import asyncio
+import base64
 import csv
 import hashlib
 import json
@@ -8,14 +9,25 @@ import os
 import re
 import shutil
 import subprocess
+from urllib.parse import urlsplit, urlunsplit
 
-from config import AMBER_ROOT, CLAUDE_CLI, CLI_TIMEOUT, CLAUDE_CODE_GIT_BASH, CLAUDE_MODEL
+from config import (
+    AMBER_ROOT,
+    CLAUDE_CLI,
+    CODEX_CLI,
+    CLI_TIMEOUT,
+    CLAUDE_CODE_GIT_BASH,
+    CLAUDE_MODEL,
+    CLAUDE_ALLOWED_TOOLS,
+    DEFAULT_MODEL_PROVIDER,
+)
 from source_registry import resolve_source
 import store
 
 log = logging.getLogger("processor")
 
 PAGEDOC_HOST = "10.0.0.54:12005"
+VISUAL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp", "page_comment_visuals")
 
 
 def _read_csv_preview(csv_path: str, max_rows: int = 5) -> str:
@@ -183,11 +195,97 @@ def _build_amber_prompt_cli(data: dict, source_info: dict, is_followup: bool = F
 7. 完成后请只用中文简要说明：你改了哪些文件、做了什么修改、如果没改文件就说明原因。"""
 
 
-def _build_generic_prompt_cli(data: dict) -> str:
-    return f"""用户在网页上选中了以下文字并发表了评论。
+def _format_target_context(target_context: dict) -> str:
+    if not target_context:
+        return ""
+    parts = [
+        f"page_type: {target_context.get('page_type', 'unknown')}",
+        f"target_type: {target_context.get('target_type', 'unknown')}",
+    ]
+    target_text = target_context.get("target_text")
+    if target_text:
+        parts.append(f"target_text: {target_text}")
+    surrounding_blocks = target_context.get("surrounding_blocks") or []
+    if surrounding_blocks:
+        parts.append("surrounding_blocks:")
+        parts.extend(f"- {block}" for block in surrounding_blocks)
+    object_meta = target_context.get("object_meta") or {}
+    if object_meta:
+        parts.append("object_meta:")
+        for key, value in object_meta.items():
+            if not value:
+                continue
+            parts.append(f"- {key}: {value}")
+    return "\n".join(parts)
 
-## 选中的文字
-{data.get("selected_text", "")}
+
+def _format_visual_context(visual_context: dict) -> str:
+    if not visual_context:
+        return ""
+    lines = []
+    file_path = visual_context.get("file_path")
+    if file_path:
+        lines.append(f"- file_path: {file_path}")
+    format_name = visual_context.get("format")
+    width = visual_context.get("width")
+    height = visual_context.get("height")
+    if format_name or width or height:
+        lines.append(f"- meta: format={format_name or 'unknown'}, size={width or '?'}x{height or '?'}")
+    return "\n".join(lines)
+
+
+def _persist_visual_context(visual_context: dict | None) -> dict:
+    if not visual_context or not visual_context.get("data_url"):
+        return visual_context or {}
+    data_url = str(visual_context.get("data_url", ""))
+    match = re.match(r"^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$", data_url)
+    if not match:
+        return visual_context
+    mime_type = match.group(1)
+    payload = match.group(2)
+    ext = ".png" if "png" in mime_type else ".jpg"
+    os.makedirs(VISUAL_DIR, exist_ok=True)
+    file_path = os.path.join(VISUAL_DIR, f"{hashlib.md5(payload.encode('utf-8')).hexdigest()}{ext}")
+    try:
+        with open(file_path, "wb") as file_obj:
+            file_obj.write(base64.b64decode(payload))
+    except Exception:
+        return visual_context
+    persisted = dict(visual_context)
+    persisted["file_path"] = file_path
+    persisted.pop("data_url", None)
+    persisted["mime_type"] = mime_type
+    return persisted
+
+
+def _build_generic_prompt_cli(data: dict) -> str:
+    selected_text = data.get("selected_text", "")
+    page_context = data.get("page_context") or {}
+    target_context = data.get("target_context") or {}
+    visual_context = data.get("visual_context") or {}
+    page_context_text = ""
+    if not selected_text:
+        page_context_text = page_context.get("content", "")
+    context_label = "选中的文字" if selected_text else "页面正文摘要"
+    context_text = selected_text or page_context_text or "(无)"
+    truncation_note = ""
+    if page_context_text and page_context.get("truncated"):
+        truncation_note = "\n注：页面正文摘要已截断，仅包含当前页面主要可见内容。"
+
+    if target_context.get("page_type") == "feishu_doc":
+        target_block = _format_target_context(target_context)
+        visual_block = _format_visual_context(visual_context)
+        visual_section = ""
+        if visual_block:
+            visual_section = f"""
+
+## 目标对象视觉上下文
+{visual_block}"""
+
+        return f"""用户在飞书页面上就当前命中的对象发起了一条评论。
+
+## 飞书页面命中对象
+{target_block}{visual_section}
 
 ## 用户评论
 {data.get("comment", "")}
@@ -195,29 +293,138 @@ def _build_generic_prompt_cli(data: dict) -> str:
 ## 页面标题
 {data.get("page_title", "")}
 
+## 页面地址
+{data.get("page_url", "")}
+
+你可以根据上述对象级上下文，自主决定是否使用已有 lark 相关能力处理飞书内容。
+请直接用中文回答用户。不要输出 JSON，不要修改任何本地文件。"""
+
+    return f"""用户在网页上就当前页面内容发起了一条评论。
+
+## {context_label}
+{context_text}{truncation_note}
+
+## 用户评论
+{data.get("comment", "")}
+
+## 页面标题
+{data.get("page_title", "")}
+
+## 页面地址
+{data.get("page_url", "")}
+
 请直接用中文回答用户。不要输出 JSON，不要修改任何文件。"""
 
 
-async def _call_claude_cli(prompt: str, cli_session_id: str = None, cwd: str | None = None, status_callback=None) -> tuple[str, str | None]:
-    """调用 Claude CLI（流式），支持 --resume 继续会话。
-    返回 (result_text, session_id)。
-    通过 stream-json 格式逐行读取事件，实时推送 AI 处理进度。
+def _normalize_page_url(page_url: str) -> str:
+    try:
+        parts = urlsplit(page_url)
+    except ValueError:
+        return page_url.split("#", 1)[0].split("?", 1)[0]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _resolve_page_key(page_url: str, page_meta: dict | None, source_info: dict | None) -> str:
+    page_meta = page_meta or {}
+    if page_meta.get("page_key"):
+        return page_meta["page_key"]
+    if source_info and source_info.get("script_path"):
+        return _build_page_key(source_info)
+    return _normalize_page_url(page_url)
+
+
+def _merge_session_state(session: dict, **updates) -> dict:
+    merged = dict(session)
+    for key, value in updates.items():
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
+def _ensure_session_title(session: dict, comment: str) -> dict:
+    if session.get("title"):
+        return session
+    title = (comment or "")[:50]
+    if not title:
+        return session
+    store.update_session(session["id"], title=title)
+    return _merge_session_state(session, title=title)
+
+
+def _normalize_model_provider(model_provider: str | None) -> str:
+    return "codex" if str(model_provider or "").strip().lower() == "codex" else "claude"
+
+
+def _ensure_session_model_provider(session: dict, requested_provider: str | None) -> dict:
+    inferred_provider = session.get("model_provider")
+    if not inferred_provider and session.get("cli_session_id"):
+        inferred_provider = DEFAULT_MODEL_PROVIDER
+    provider = _normalize_model_provider(inferred_provider or requested_provider or DEFAULT_MODEL_PROVIDER)
+    if session.get("model_provider") == provider:
+        return session
+    store.update_session(session["id"], model_provider=provider)
+    return _merge_session_state(session, model_provider=provider)
+
+
+def _save_cli_session(session: dict, cli_session_id: str | None) -> dict:
+    if not cli_session_id:
+        log.warning("CLI 未返回 session_id，后续消息将无法续用会话")
+        return session
+    if session.get("cli_session_id") == cli_session_id:
+        return session
+    log.info("保存 CLI session: %s -> session %s", cli_session_id, session["id"][:12])
+    store.update_session(session["id"], cli_session_id=cli_session_id)
+    return _merge_session_state(session, cli_session_id=cli_session_id)
+
+
+def _build_resume_command(model_provider: str, cli_session_id: str) -> list[str]:
+    provider = _normalize_model_provider(model_provider)
+    if provider == "codex":
+        return list(CODEX_CLI if isinstance(CODEX_CLI, list) else [CODEX_CLI]) + [
+            "exec",
+            "--json",
+            "--full-auto",
+            "--skip-git-repo-check",
+            "resume",
+            cli_session_id,
+        ]
+    return list(CLAUDE_CLI if isinstance(CLAUDE_CLI, list) else [CLAUDE_CLI]) + ["--resume", cli_session_id]
+
+
+async def _call_cli(prompt: str, cli_session_id: str = None, cwd: str | None = None, status_callback=None, model_provider: str = "claude", interaction_queue: asyncio.Queue | None = None) -> tuple[str, str | None]:
+    """调用 CLI（流式），支持 provider 特定 resume 继续会话。
+    interaction_queue: 用于接收前端交互回复（AskUserQuestion 等），由 server 层注入。
     """
-    base_cmd = CLAUDE_CLI if isinstance(CLAUDE_CLI, list) else [CLAUDE_CLI]
-    cmd = base_cmd + [
-        "-p", "-",
-        "--model", CLAUDE_MODEL,
-        "--output-format", "stream-json",
-        "--verbose",
-        "--allowedTools", "Edit,Write,Read",
-    ]
-    if cli_session_id:
-        cmd.extend(["--resume", cli_session_id])
+    provider = _normalize_model_provider(model_provider)
+    if provider == "codex":
+        base_cmd = CODEX_CLI if isinstance(CODEX_CLI, list) else [CODEX_CLI]
+        if cli_session_id:
+            cmd = _build_resume_command(provider, cli_session_id) + [prompt]
+        else:
+            cmd = list(base_cmd) + [
+                "exec",
+                "--json",
+                "--full-auto",
+                "--skip-git-repo-check",
+                prompt,
+            ]
+    else:
+        base_cmd = CLAUDE_CLI if isinstance(CLAUDE_CLI, list) else [CLAUDE_CLI]
+        cmd = list(base_cmd) + [
+            "-p", "-",
+            "--model", CLAUDE_MODEL,
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--allowedTools", ",".join(CLAUDE_ALLOWED_TOOLS),
+        ]
+        if cli_session_id:
+            cmd.extend(["--resume", cli_session_id])
 
     env = os.environ.copy()
     env["CLAUDE_CODE_GIT_BASH_PATH"] = CLAUDE_CODE_GIT_BASH
 
-    log.info("CLI 调用: %s (session=%s, cwd=%s, prompt=%d chars)", CLAUDE_CLI, cli_session_id or "new", cwd or os.getcwd(), len(prompt))
+    log.info("CLI 调用: %s (provider=%s, session=%s, cwd=%s, prompt=%d chars)", cmd[:6], provider, cli_session_id or "new", cwd or os.getcwd(), len(prompt))
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
@@ -231,11 +438,22 @@ async def _call_claude_cli(prompt: str, cli_session_id: str = None, cwd: str | N
             creationflags=creationflags,
         )
     except FileNotFoundError as e:
-        raise RuntimeError(f"Claude CLI 启动失败: {e}")
+        raise RuntimeError(f"{provider} CLI 启动失败: {e}")
 
-    proc.stdin.write(prompt.encode("utf-8"))
-    await proc.stdin.drain()
-    proc.stdin.close()
+    if provider == "claude":
+        # stream-json 输入格式: 发送用户消息
+        init_msg = json.dumps({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt}],
+            },
+        })
+        proc.stdin.write((init_msg + "\n").encode("utf-8"))
+        await proc.stdin.drain()
+        # 不关闭 stdin — 保持开放用于后续交互回复
+    elif proc.stdin:
+        proc.stdin.close()
 
     result_text = ""
     result_is_error = False
@@ -245,6 +463,20 @@ async def _call_claude_cli(prompt: str, cli_session_id: str = None, cwd: str | N
     async def _send_status(msg: str):
         if status_callback:
             await status_callback("editing", msg)
+
+    async def _send_interaction(data: dict):
+        """发送交互事件（AskUserQuestion 等）到前端"""
+        if status_callback:
+            await status_callback("interaction", json.dumps(data, ensure_ascii=False))
+
+    async def _write_stdin(payload: str):
+        """安全写入 stdin"""
+        try:
+            if proc.stdin and not proc.stdin.is_closing():
+                proc.stdin.write((payload + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            log.warning("写入 CLI stdin 失败（进程可能已退出）")
 
     async def _read_stream():
         nonlocal result_text, result_is_error, new_session_id, last_text_status_time
@@ -262,59 +494,152 @@ async def _call_claude_cli(prompt: str, cli_session_id: str = None, cwd: str | N
 
             etype = event.get("type")
 
-            if etype == "system" and event.get("subtype") == "init":
-                sid = event.get("session_id")
-                if sid:
-                    new_session_id = sid
-
-            elif etype == "assistant":
-                blocks = event.get("message", {}).get("content", [])
-                for block in blocks:
-                    btype = block.get("type")
-                    if btype == "thinking":
-                        await _send_status("AI 正在思考...")
-                    elif btype == "tool_use":
-                        tool_name = block.get("name", "")
-                        file_path = block.get("input", {}).get("file_path", "")
-                        filename = os.path.basename(file_path) if file_path else ""
-                        label_map = {"Read": "正在读取", "Edit": "正在编辑", "Write": "正在写入"}
-                        label = label_map.get(tool_name)
-                        if label and filename:
-                            await _send_status(f"{label}: {filename}")
-                        elif tool_name:
-                            await _send_status(f"正在使用工具: {tool_name}")
-                    elif btype == "text":
+            if provider == "codex":
+                if etype == "task_started":
+                    sid = event.get("session_id")
+                    if sid:
+                        new_session_id = sid
+                elif etype in ("agent_message_delta", "agent_message"):
+                    chunk = event.get("delta") or event.get("message") or event.get("content") or ""
+                    if isinstance(chunk, list):
+                        chunk = " ".join(str(item.get("text", "")) for item in chunk if isinstance(item, dict))
+                    chunk = str(chunk)
+                    if chunk:
+                        result_text = (result_text or "") + chunk
                         now = asyncio.get_event_loop().time()
                         if now - last_text_status_time > 3:
                             last_text_status_time = now
-                            preview = (block.get("text") or "")[:40].replace("\n", " ")
-                            if preview:
-                                await _send_status(f"AI: {preview}...")
+                            await _send_status(f"AI: {(result_text or '').strip()}")
+                elif etype == "task_complete":
+                    result_text = event.get("last_message") or result_text
+                    new_session_id = event.get("session_id", new_session_id)
+                    result_is_error = bool(event.get("is_error", False))
+                    break
+                elif etype in ("task_error", "error"):
+                    result_is_error = True
+                    result_text = event.get("message") or event.get("error") or result_text
+                    break
+            else:
+                if etype == "system" and event.get("subtype") == "init":
+                    sid = event.get("session_id")
+                    if sid:
+                        new_session_id = sid
 
-            elif etype == "result":
-                result_text = event.get("result", "")
-                result_is_error = event.get("is_error", False)
-                new_session_id = event.get("session_id", new_session_id)
-                duration = event.get("duration_ms", 0)
-                log.info("CLI 完成: %dms, session=%s, is_error=%s", duration, new_session_id, result_is_error)
+                elif etype == "assistant":
+                    blocks = event.get("message", {}).get("content", [])
+                    for block in blocks:
+                        btype = block.get("type")
+                        if btype == "thinking":
+                            await _send_status("AI 正在思考...")
+                        elif btype == "tool_use":
+                            tool_name = block.get("name", "")
+                            tool_input = block.get("input", {})
+                            tool_use_id = block.get("id", "")
+
+                            if tool_name == "AskUserQuestion" and interaction_queue:
+                                # 转发选项到前端，等待用户回复
+                                questions = tool_input.get("questions", [])
+                                await _send_interaction({
+                                    "interaction_type": "ask_user",
+                                    "interaction_id": tool_use_id,
+                                    "questions": questions,
+                                })
+                                try:
+                                    response = await asyncio.wait_for(
+                                        interaction_queue.get(), timeout=120,
+                                    )
+                                    # 将用户回复写入 stdin
+                                    answer_event = json.dumps({
+                                        "type": "user",
+                                        "message": {
+                                            "role": "user",
+                                            "content": [{
+                                                "type": "tool_result",
+                                                "tool_use_id": tool_use_id,
+                                                "content": json.dumps(response, ensure_ascii=False),
+                                            }],
+                                        },
+                                    })
+                                    await _write_stdin(answer_event)
+                                except asyncio.TimeoutError:
+                                    log.warning("交互回复超时 (120s), tool_use_id=%s", tool_use_id)
+                            else:
+                                file_path = tool_input.get("file_path", "")
+                                filename = os.path.basename(file_path) if file_path else ""
+                                label_map = {
+                                    "Read": "正在读取", "Edit": "正在编辑", "Write": "正在写入",
+                                    "Glob": "正在搜索文件", "Grep": "正在搜索内容",
+                                    "Bash": "正在执行命令", "Agent": "正在调用子代理",
+                                }
+                                label = label_map.get(tool_name)
+                                if label and filename:
+                                    await _send_status(f"{label}: {filename}")
+                                elif label:
+                                    cmd_preview = tool_input.get("command", "")[:30]
+                                    pattern_preview = tool_input.get("pattern", "")[:30]
+                                    detail = cmd_preview or pattern_preview or ""
+                                    if detail:
+                                        await _send_status(f"{label}: {detail}")
+                                    else:
+                                        await _send_status(label)
+                                elif tool_name:
+                                    await _send_status(f"正在使用工具: {tool_name}")
+                        elif btype == "text":
+                            txt = block.get("text") or ""
+                            result_text = (result_text or "") + txt
+                            now = asyncio.get_event_loop().time()
+                            if now - last_text_status_time > 3:
+                                last_text_status_time = now
+                                if result_text and result_text.strip():
+                                    await _send_status(f"AI: {result_text.strip()}")
+
+                elif etype == "result":
+                    result_text = event.get("result", "")
+                    result_is_error = event.get("is_error", False)
+                    new_session_id = event.get("session_id", new_session_id)
+                    duration = event.get("duration_ms", 0)
+                    log.info("CLI 完成: %dms, session=%s, is_error=%s", duration, new_session_id, result_is_error)
+                    break
 
     try:
         await asyncio.wait_for(_read_stream(), timeout=CLI_TIMEOUT)
     except asyncio.TimeoutError:
+        log.warning("%s CLI 超时 (%ds), session=%s", provider, CLI_TIMEOUT, new_session_id or cli_session_id)
         proc.kill()
-        raise RuntimeError(f"Claude CLI 超时 ({CLI_TIMEOUT}s)")
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            log.error("%s CLI 进程在 kill 后仍未退出", provider)
+        raise RuntimeError(f"{provider} CLI 超时 ({CLI_TIMEOUT}s)")
 
-    await proc.wait()
-    stderr_bytes = await proc.stderr.read()
-    stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+    # 关闭 stdin（如果还开着）
+    if proc.stdin and not proc.stdin.is_closing():
+        proc.stdin.close()
+
+    # proc.wait() 和 stderr 读取也加超时保护
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        log.error("%s CLI 进程 wait() 超时，强制终止", provider)
+        proc.kill()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
+    try:
+        stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5)
+        stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+    except asyncio.TimeoutError:
+        stderr = ""
 
     if result_is_error:
         error_detail = result_text or stderr or "(无详情)"
-        raise RuntimeError(f"Claude CLI 返回错误: {error_detail[-500:]}")
+        raise RuntimeError(f"{provider} CLI 返回错误: {error_detail[-500:]}")
     if proc.returncode != 0 and not result_text:
-        raise RuntimeError(f"Claude CLI 失败 (code {proc.returncode}): {stderr[-500:]}")
+        raise RuntimeError(f"{provider} CLI 失败 (code {proc.returncode}): {stderr[-500:]}")
     if proc.returncode != 0:
-        log.warning("CLI 返回非零退出码 %d，但已获取到结果，继续处理 (stderr: %s)", proc.returncode, stderr[-200:])
+        log.warning("%s CLI 返回非零退出码 %d，但已获取到结果，继续处理 (stderr: %s)", provider, proc.returncode, stderr[-200:])
 
     return (result_text or "").strip(), new_session_id
 
@@ -390,38 +715,45 @@ def _inject_source_meta(html_path: str, source_info: dict) -> None:
     except Exception:
         return
 
-    if 'amber:source-script' in content:
-        return
-
     script_path = source_info.get("script_path", "")
     try:
         script_rel = os.path.relpath(script_path, AMBER_ROOT).replace("\\", "/")
     except ValueError:
         return
+    page_key = _build_page_key(source_info)
 
-    meta_tags = f'  <meta name="amber:source-script" content="{script_rel}">'
+    meta_tags = []
+    if 'amber:source-script' not in content:
+        meta_tags.append(f'  <meta name="amber:source-script" content="{script_rel}">')
     data_dir = source_info.get("data_dir")
-    if data_dir:
+    if data_dir and 'amber:source-data' not in content:
         try:
             data_rel = os.path.relpath(data_dir, AMBER_ROOT).replace("\\", "/")
-            meta_tags += f'\n  <meta name="amber:source-data" content="{data_rel}">'
+            meta_tags.append(f'  <meta name="amber:source-data" content="{data_rel}">')
         except ValueError:
             pass
+    if 'amber:page-key' not in content:
+        meta_tags.append(f'  <meta name="amber:page-key" content="{page_key}">')
+
+    if not meta_tags:
+        return
+
+    meta_block = "\n".join(meta_tags)
 
     # 插入到 <head> 后面或 <html> 后面
     for anchor in ("<head>", "<HEAD>", "<html>", "<HTML>"):
         pos = content.find(anchor)
         if pos >= 0:
             insert_at = pos + len(anchor)
-            content = content[:insert_at] + "\n" + meta_tags + "\n" + content[insert_at:]
+            content = content[:insert_at] + "\n" + meta_block + "\n" + content[insert_at:]
             break
     else:
-        content = meta_tags + "\n" + content
+        content = meta_block + "\n" + content
 
     try:
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(content)
-        log.info("已注入 source meta: %s", script_rel)
+        log.info("已注入 source meta: %s", page_key)
     except Exception as e:
         log.warning("注入 meta 失败: %s", e)
 
@@ -460,7 +792,7 @@ async def _regenerate(source_info: dict, status_callback) -> bool:
         return False
 
 
-def _resolve_session(page_key: str, page_url: str, requested_session_id: str | None) -> dict:
+def _resolve_session(page_key: str, page_url: str, requested_session_id: str | None, model_provider: str | None = None) -> dict:
     session = None
     if requested_session_id:
         candidate = store.get_session(requested_session_id)
@@ -469,20 +801,100 @@ def _resolve_session(page_key: str, page_url: str, requested_session_id: str | N
     if not session:
         session = store.get_active_session(page_key)
     if not session:
-        session = store.create_session(page_key, page_url)
+        session = store.create_session(
+            page_key,
+            page_url,
+            model_provider=_normalize_model_provider(model_provider or DEFAULT_MODEL_PROVIDER),
+        )
     return session
 
 
-async def _handle_non_amber(data: dict, status_callback) -> dict:
+async def _handle_non_amber(data: dict, status_callback, interaction_queue: asyncio.Queue | None = None) -> dict:
     await status_callback("processing", "正在回答问题...")
-    response_text, _ = await _call_claude_cli(_build_generic_prompt_cli(data), cwd=AMBER_ROOT, status_callback=status_callback)
+    page_url = data.get("page_url", "")
+    page_meta = data.get("page_meta", {})
+    requested_session_id = data.get("session_id")
+    parent_id = data.get("parent_id")
+    requested_provider = data.get("model_provider")
+    page_key = _resolve_page_key(page_url, page_meta, None)
+    session = _resolve_session(page_key, page_url, requested_session_id, requested_provider)
+    if requested_session_id or not session.get("model_provider"):
+        session = _ensure_session_model_provider(session, requested_provider)
+
+    cli_sid = store.get_thread_id(parent_id) if parent_id else None
+    if not cli_sid:
+        cli_sid = session.get("cli_session_id")
+
+    user_msg = store.add_message(
+        session_id=session["id"],
+        role="user",
+        content=data.get("comment", ""),
+        selected_text=data.get("selected_text"),
+        chart_info=json.dumps(data.get("chart_info"), ensure_ascii=False) if data.get("chart_info") else None,
+        parent_id=parent_id,
+    )
+
+    prompt_data = dict(data)
+    prompt_data["visual_context"] = _persist_visual_context(data.get("visual_context"))
+
+    try:
+        response_text, new_cli_sid = await _call_cli(
+            _build_generic_prompt_cli(prompt_data),
+            cli_sid,
+            cwd=AMBER_ROOT,
+            status_callback=status_callback,
+            model_provider=session.get("model_provider") or requested_provider or DEFAULT_MODEL_PROVIDER,
+            interaction_queue=interaction_queue,
+        )
+    except RuntimeError as e:
+        err_msg = str(e)
+        if cli_sid and ("Invalid" in err_msg or "signature" in err_msg or "invalid_request" in err_msg):
+            friendly = (
+                f"无法续用会话 {cli_sid[:12]}...：当前 API 配置与原始会话不兼容"
+                f"（模型或 API 地址不同）。请新建空白会话后重试。"
+            )
+        elif "超时" in err_msg or "Timeout" in err_msg:
+            log.warning("通用页面 CLI 超时: %s", err_msg[:200])
+            friendly = "处理超时，请稍后重试。"
+            friendly = "处理失败，请查看服务端日志了解详情。"
+        store.add_message(
+            session_id=session["id"],
+            role="assistant",
+            content=friendly,
+            parent_id=user_msg["id"],
+        )
+        session = _ensure_session_title(session, data.get("comment", ""))
+        return {
+            "response": friendly,
+            "action": "none",
+            "session_id": session["id"],
+            "message_id": user_msg["id"],
+            "page_key": page_key,
+            "cli_session_id": session.get("cli_session_id"),
+            "session": session,
+        }
+    session = _save_cli_session(session, new_cli_sid)
+    session = _ensure_session_title(session, data.get("comment", ""))
+
+    store.add_message(
+        session_id=session["id"],
+        role="assistant",
+        content=response_text,
+        parent_id=user_msg["id"],
+        cli_thread_id=new_cli_sid if parent_id else None,
+    )
     return {
         "response": response_text,
         "action": "none",
+        "session_id": session["id"],
+        "message_id": user_msg["id"],
+        "page_key": page_key,
+        "cli_session_id": session.get("cli_session_id"),
+        "session": session,
     }
 
 
-async def process_comment(data: dict, status_callback) -> dict:
+async def process_comment(data: dict, status_callback, interaction_queue: asyncio.Queue | None = None) -> dict:
     """
     处理一条评论。
 
@@ -494,19 +906,36 @@ async def process_comment(data: dict, status_callback) -> dict:
     page_meta = data.get("page_meta", {})
     parent_id = data.get("parent_id")
     requested_session_id = data.get("session_id")
+    requested_provider = data.get("model_provider")
 
     source_info = resolve_source(page_url, page_meta)
     page_type = _classify_page(page_url, source_info)
     log.info("页面类型: %s, URL: %s", page_type, page_url[:80])
 
     if page_type != "amber_dashboard":
-        return await _handle_non_amber(data, status_callback)
+        return await _handle_non_amber(data, status_callback, interaction_queue)
 
-    page_key = _build_page_key(source_info)
+    page_key = _resolve_page_key(page_url, page_meta, source_info)
     project_root = source_info.get("project_root") or os.path.dirname(source_info["script_path"])
     await status_callback("processing", f"已追溯到脚本: {os.path.basename(source_info['script_path'])}")
 
-    session = _resolve_session(page_key, page_url, requested_session_id)
+    session = _resolve_session(page_key, page_url, requested_session_id, requested_provider)
+    if requested_session_id or not session.get("model_provider"):
+        session = _ensure_session_model_provider(session, requested_provider)
+
+    # 自动链接创建者会话
+    creator_sid = data.get("page_meta", {}).get("creator_session")
+    if creator_sid and not session.get("cli_session_id") and session.get("session_type", "normal") == "normal":
+        store.update_session(session["id"],
+                             cli_session_id=creator_sid,
+                             creator_session_id=creator_sid,
+                             session_type="linked")
+        session = _merge_session_state(
+            session,
+            cli_session_id=creator_sid,
+            creator_session_id=creator_sid,
+            session_type="linked",
+        )
 
     cli_sid = store.get_thread_id(parent_id) if parent_id else None
     if not cli_sid:
@@ -529,17 +958,50 @@ async def process_comment(data: dict, status_callback) -> dict:
     before_snapshot = _snapshot_files(modifiable_files)
     backups = _backup_files(modifiable_files)
 
-    await status_callback("editing", "正在让模型直接修改源文件...")
-    response_text, new_cli_sid = await _call_claude_cli(prompt, cli_sid, cwd=project_root, status_callback=status_callback)
+    await status_callback("editing", "Claude 正在思考...")
+    try:
+        response_text, new_cli_sid = await _call_cli(
+            prompt,
+            cli_sid,
+            cwd=project_root,
+            status_callback=status_callback,
+            model_provider=session.get("model_provider") or requested_provider or DEFAULT_MODEL_PROVIDER,
+            interaction_queue=interaction_queue,
+        )
+    except RuntimeError as e:
+        err_msg = str(e)
+        _cleanup_backups(backups)
+
+        if cli_sid and ("Invalid" in err_msg or "signature" in err_msg or "invalid_request" in err_msg):
+            log.warning("Resume 失败（API 不兼容）: %s", err_msg[:200])
+            friendly = (
+                f"无法续用会话 {cli_sid[:12]}...：当前 API 配置与原始会话不兼容"
+                f"（模型或 API 地址不同）。请新建空白会话后重试。"
+            )
+        elif "超时" in err_msg or "Timeout" in err_msg:
+            log.warning("Amber dashboard CLI 超时: %s", err_msg[:200])
+            friendly = "处理超时，请稍后重试。"
+            friendly = "处理失败，请查看服务端日志了解详情。"
+
+        store.add_message(session_id=session["id"], role="assistant", content=friendly,
+                          parent_id=user_msg["id"])
+        session = _ensure_session_title(session, data.get("comment", ""))
+        return {
+            "response": friendly,
+            "action": "none",
+            "session_id": session["id"],
+            "message_id": user_msg["id"],
+            "page_key": page_key,
+            "cli_session_id": session.get("cli_session_id"),
+            "session": session,
+        }
 
     after_snapshot = _snapshot_files(modifiable_files)
     changed_files = _detect_changes(before_snapshot, after_snapshot)
 
-    if new_cli_sid and new_cli_sid != session.get("cli_session_id") and not parent_id:
-        store.update_session(session["id"], cli_session_id=new_cli_sid)
-
-    if not session.get("title"):
-        store.update_session(session["id"], title=data.get("comment", "")[:50])
+    # 始终保存 CLI session ID（确保后续消息能 --resume）
+    session = _save_cli_session(session, new_cli_sid)
+    session = _ensure_session_title(session, data.get("comment", ""))
 
     action = "none"
     edit_success = None
@@ -578,5 +1040,6 @@ async def process_comment(data: dict, status_callback) -> dict:
         "session_id": session["id"],
         "message_id": user_msg["id"],
         "page_key": page_key,
-        "cli_session_id": new_cli_sid,
+        "cli_session_id": session.get("cli_session_id"),
+        "session": session,
     }

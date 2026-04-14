@@ -14,6 +14,8 @@ OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "outputs", "2026-04-
 CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "fake_user_metrics.csv")
 LTV_CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "fake_user_ltv.csv")
 AD_MONETIZATION_CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "fake_ad_monetization.csv")
+LEVEL_STATS_CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "fake_level_stats.csv")
+AD_SPEND_CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "fake_ad_spend.csv")
 
 # 读取CSV数据
 user_metrics = []
@@ -40,6 +42,22 @@ if os.path.exists(AD_MONETIZATION_CSV_PATH):
 else:
     ad_monetization = []
 
+level_stats = []
+if os.path.exists(LEVEL_STATS_CSV_PATH):
+    with open(LEVEL_STATS_CSV_PATH, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        level_stats = list(reader)
+else:
+    level_stats = []
+
+ad_spend = []
+if os.path.exists(AD_SPEND_CSV_PATH):
+    with open(AD_SPEND_CSV_PATH, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        ad_spend = list(reader)
+else:
+    ad_spend = []
+
 HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -50,7 +68,7 @@ HTML = """<!DOCTYPE html>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #f5f6fa; color: #333; padding: 24px; }
-  .container { max-width: 1100px; margin: 0 auto; }
+  .container { width: 100%; max-width: 1100px; margin: 0 auto; }
   h1 { font-size: 22px; margin-bottom: 6px; }
   .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
   /* KPI cards */
@@ -78,10 +96,12 @@ HTML = """<!DOCTYPE html>
   .conclusion ul { padding-left: 20px; font-size: 14px; line-height: 1.9; }
   .highlight { background: #fff8e1; padding: 2px 6px; border-radius: 3px; }
   /* charts */
-  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; width: 100%; }
   .chart-row.single-chart { grid-template-columns: 1fr; }
-  .chart-container { position: relative; height: 300px; }
-  @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
+  .chart-container { position: relative; height: 300px; width: 100%; overflow: hidden; }
+  @media (max-width: 1200px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } .kpi-row { grid-template-columns: 1fr; } body { padding: 16px; } }
+  @media (max-width: 600px) { .section { padding: 16px 12px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
 </style>
 </head>
 <body>
@@ -132,15 +152,10 @@ HTML = """<!DOCTYPE html>
   <h2>关卡漏斗数据</h2>
   <table>
     <thead>
-      <tr><th>关卡</th><th>进入人数</th><th>通过人数</th><th>通过率</th><th>平均耗时 (s)</th><th>平均尝试次数</th></tr>
+      <tr><th>关卡</th><th>尝试次数</th><th>完成次数</th><th>通过率</th><th>平均耗时 (s)</th><th>平均移动数</th><th>提示使用</th></tr>
     </thead>
     <tbody>
-      <tr><td>Level 1</td><td>128,450</td><td>125,320</td><td>97.6%</td><td>23</td><td>1.0</td></tr>
-      <tr><td>Level 5</td><td>98,200</td><td>89,740</td><td>91.4%</td><td>45</td><td>1.3</td></tr>
-      <tr><td>Level 10</td><td>72,600</td><td>58,080</td><td>80.0%</td><td>68</td><td>1.8</td></tr>
-      <tr><td>Level 20</td><td>45,300</td><td>30,804</td><td>68.0%</td><td>92</td><td>2.4</td></tr>
-      <tr><td>Level 30</td><td>28,100</td><td>16,298</td><td>58.0%</td><td>115</td><td>3.1</td></tr>
-      <tr><td>Level 50</td><td>12,400</td><td>5,580</td><td>45.0%</td><td>148</td><td>4.2</td></tr>
+      {level_stats_rows}
     </tbody>
   </table>
   <div class="chart-row single-chart">
@@ -152,14 +167,10 @@ HTML = """<!DOCTYPE html>
   <h2>渠道获客数据</h2>
   <table>
     <thead>
-      <tr><th>渠道</th><th>新增用户</th><th>CPI ($)</th><th>次日留存</th><th>LTV D7 ($)</th><th>ROI D7</th></tr>
+      <tr><th>渠道</th><th>新增用户</th><th>CPI ($)</th><th>点击率</th><th>展示次数</th></tr>
     </thead>
     <tbody>
-      <tr><td>Google Ads</td><td>42,300</td><td>0.35</td><td>44.2%</td><td>0.92</td><td>163%</td></tr>
-      <tr><td>Facebook</td><td>31,500</td><td>0.41</td><td>40.8%</td><td>0.85</td><td>107%</td></tr>
-      <tr><td>Unity Ads</td><td>18,700</td><td>0.28</td><td>38.5%</td><td>0.78</td><td>179%</td></tr>
-      <tr><td>TikTok</td><td>15,200</td><td>0.52</td><td>46.1%</td><td>0.98</td><td>88%</td></tr>
-      <tr><td>Organic</td><td>21,800</td><td>—</td><td>48.3%</td><td>1.05</td><td>—</td></tr>
+      {channel_stats_rows}
     </tbody>
   </table>
   <div class="chart-row">
@@ -223,11 +234,7 @@ HTML = """<!DOCTYPE html>
 <div class="section conclusion">
   <h2>分析结论</h2>
   <ul>
-    <li><span class="highlight">增长驱动</span>：DAU 环比增长 12.3%，主要由 Google Ads 放量驱动</li>
-    <li><span class="highlight">难度优化</span>：Level 20 之后通过率骤降至 68%，建议重点优化 Level 15-25 的难度曲线</li>
-    <li><span class="highlight">渠道评估</span>：TikTok 渠道虽 CPI 最高（$0.52），但次日留存最优（46.1%），D7 ROI 尚未回本（88%），需持续观察长期 LTV 表现</li>
-    <li><span class="highlight">预算建议</span>：Unity Ads ROI 表现最优（179%），建议适度增加投放预算</li>
-    <li><span class="highlight">用户结构</span>：人均时长下降 0.5 min，主要因新用户占比提升，老用户时长保持稳定</li>
+    {insights_html}
   </ul>
 </div>
 
@@ -237,22 +244,22 @@ const funnelCtx = document.getElementById('funnelChart').getContext('2d');
 new Chart(funnelCtx, {
   type: 'bar',
   data: {
-    labels: ['Level 1', 'Level 5', 'Level 10', 'Level 20', 'Level 30', 'Level 50'],
+    labels: {level_labels_json},
     datasets: [{
-      label: '进入人数',
-      data: [128450, 98200, 72600, 45300, 28100, 12400],
+      label: '尝试次数',
+      data: {level_attempts_json},
       backgroundColor: '#4a6cf7',
       borderRadius: 4,
       yAxisID: 'y'
     }, {
-      label: '通过人数',
-      data: [125320, 89740, 58080, 30804, 16298, 5580],
+      label: '完成次数',
+      data: {level_completions_json},
       backgroundColor: '#2ecc71',
       borderRadius: 4,
       yAxisID: 'y'
     }, {
       label: '通过率',
-      data: [97.6, 91.4, 80.0, 68.0, 58.0, 45.0],
+      data: {level_pass_rate_json},
       borderColor: '#f39c12',
       backgroundColor: 'rgba(243, 156, 18, 0.1)',
       borderWidth: 2,
@@ -279,23 +286,18 @@ new Chart(funnelCtx, {
 
 const channelUsersCtx = document.getElementById('channelUsersChart').getContext('2d');
 new Chart(channelUsersCtx, {
-  type: 'line',
+  type: 'bar',
   data: {
-    labels: ['Google Ads', 'Facebook', 'Unity Ads', 'TikTok', 'Organic'],
+    labels: {channel_labels_json},
     datasets: [{
       label: '新增用户',
-      data: [42300, 31500, 18700, 15200, 21800],
-      borderColor: '#4a6cf7',
-      backgroundColor: 'rgba(74, 108, 247, 0.1)',
-      borderWidth: 2,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 5,
-      pointBackgroundColor: '#4a6cf7',
+      data: {channel_installs_json},
+      backgroundColor: '#4a6cf7',
+      borderRadius: 4,
       yAxisID: 'y'
     }, {
       label: 'CPI ($)',
-      data: [0.35, 0.41, 0.28, 0.52, 0],
+      data: {channel_cpi_json},
       borderColor: '#e74c3c',
       backgroundColor: 'rgba(231, 76, 60, 0.1)',
       borderWidth: 2,
@@ -303,6 +305,7 @@ new Chart(channelUsersCtx, {
       tension: 0.4,
       pointRadius: 5,
       pointBackgroundColor: '#e74c3c',
+      type: 'line',
       yAxisID: 'y1'
     }]
   },
@@ -321,10 +324,10 @@ const channelROICtx = document.getElementById('channelROIChart').getContext('2d'
 new Chart(channelROICtx, {
   type: 'bar',
   data: {
-    labels: ['Google Ads', 'Facebook', 'Unity Ads', 'TikTok', 'Organic'],
+    labels: {channel_labels_json},
     datasets: [{
-      label: 'ROI D7',
-      data: [163, 107, 179, 88, 0],
+      label: 'CTR (%)',
+      data: {channel_ctr_json},
       backgroundColor: '#2ecc71',
       borderRadius: 4
     }]
@@ -479,16 +482,10 @@ new Chart(adFormatCtx, {
       borderRadius: 4,
       yAxisID: 'y'
     }, {
-      label: 'ECPM ($)',
-      data: {ad_ecpms_json},
-      borderColor: '#f39c12',
-      backgroundColor: 'rgba(243, 156, 18, 0.1)',
-      borderWidth: 2,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 5,
-      pointBackgroundColor: '#f39c12',
-      type: 'line',
+      label: '收入 ($)',
+      data: {ad_revenues_json},
+      backgroundColor: '#2ecc71',
+      borderRadius: 4,
       yAxisID: 'y1'
     }]
   },
@@ -497,8 +494,8 @@ new Chart(adFormatCtx, {
     maintainAspectRatio: false,
     plugins: { legend: { position: 'top' } },
     scales: {
-      y: { beginAtZero: true, position: 'left' },
-      y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false } }
+      y: { beginAtZero: true, position: 'left', title: { display: true, text: '展示次数' } },
+      y1: { beginAtZero: true, position: 'right', title: { display: true, text: '收入 ($)' }, grid: { drawOnChartArea: false } }
     }
   }
 });
@@ -509,20 +506,120 @@ new Chart(adRevenueCtx, {
   data: {
     labels: {revenue_dates_json},
     datasets: [
-      {datasets_js}
+      {fillrate_datasets_js}
     ]
   },
   options: {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { position: 'top' } },
-    scales: { y: { beginAtZero: true } }
+    scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: '填充率 (%)' } } }
   }
 });
 </script>
 </body>
 </html>
 """
+
+# 生成关卡漏斗表格行和图表数据
+level_stats_rows = ""
+level_labels = []
+level_attempts = []
+level_completions = []
+level_pass_rates = []
+
+if level_stats:
+    # 按关卡聚合数据（求和）
+    level_data = {}
+    for row in level_stats:
+        level = row['level']
+        if level not in level_data:
+            level_data[level] = {'attempts': 0, 'completions': 0}
+        level_data[level]['attempts'] += int(row['attempts'])
+        level_data[level]['completions'] += int(row['completions'])
+
+    # 按关卡号排序并生成表格
+    for level in sorted(level_data.keys(), key=lambda x: int(x)):
+        attempts = level_data[level]['attempts']
+        completions = level_data[level]['completions']
+        pass_rate = (completions / attempts * 100) if attempts > 0 else 0
+
+        # 获取最新一条记录的详细数据（用于平均耗时等）
+        detail_row = next((r for r in level_stats if r['level'] == level), None)
+        if detail_row:
+            avg_time = detail_row['avg_time_sec']
+            avg_moves = detail_row['avg_moves']
+            hint_used = detail_row['hint_used']
+        else:
+            avg_time = avg_moves = hint_used = 0
+
+        level_labels.append(f"Level {level}")
+        level_attempts.append(attempts)
+        level_completions.append(completions)
+        level_pass_rates.append(round(pass_rate, 1))
+
+        level_stats_rows += f"""      <tr><td>Level {level}</td><td>{attempts}</td><td>{completions}</td><td>{pass_rate:.1f}%</td><td>{avg_time}</td><td>{avg_moves}</td><td>{hint_used}</td></tr>
+"""
+
+level_labels_json = str(level_labels).replace("'", '"')
+level_attempts_json = str(level_attempts)
+level_completions_json = str(level_completions)
+level_pass_rate_json = str(level_pass_rates)
+
+HTML = HTML.replace("{level_stats_rows}", level_stats_rows)
+HTML = HTML.replace("{level_labels_json}", level_labels_json)
+HTML = HTML.replace("{level_attempts_json}", level_attempts_json)
+HTML = HTML.replace("{level_completions_json}", level_completions_json)
+HTML = HTML.replace("{level_pass_rate_json}", level_pass_rate_json)
+
+# 生成渠道统计数据
+channel_stats_rows = ""
+channel_labels = []
+channel_installs = []
+channel_cpi = []
+channel_ctr = []
+
+if ad_spend:
+    # 按渠道聚合数据
+    channel_data = {}
+    for row in ad_spend:
+        channel = row['channel'].replace('_', ' ').title()
+        if channel not in channel_data:
+            channel_data[channel] = {'installs': 0, 'cost': 0, 'impressions': 0, 'clicks': 0, 'ctr': 0, 'count': 0}
+        channel_data[channel]['installs'] += int(row['installs'])
+        channel_data[channel]['cost'] += float(row['cost_usd'])
+        channel_data[channel]['impressions'] += int(row['impressions'])
+        channel_data[channel]['clicks'] += int(row['clicks'])
+        channel_data[channel]['ctr'] += float(row['ctr'])
+        channel_data[channel]['count'] += 1
+
+    # 计算平均值并生成表格
+    for channel in sorted(channel_data.keys()):
+        data = channel_data[channel]
+        installs = data['installs']
+        cost = data['cost']
+        cpi = cost / installs if installs > 0 else 0
+        avg_ctr = data['ctr'] / data['count']
+        impressions = data['impressions']
+
+        channel_labels.append(channel)
+        channel_installs.append(installs)
+        channel_cpi.append(round(cpi, 2))
+        channel_ctr.append(round(avg_ctr, 2))
+
+        channel_stats_rows += f"""      <tr><td>{channel}</td><td>{installs}</td><td>${cpi:.2f}</td><td>{avg_ctr:.2f}%</td><td>{impressions}</td></tr>
+"""
+
+channel_labels_json = str(channel_labels).replace("'", '"')
+channel_installs_json = str(channel_installs)
+channel_cpi_json = str(channel_cpi)
+channel_ctr_json = str(channel_ctr)
+
+HTML = HTML.replace("{channel_stats_rows}", channel_stats_rows)
+HTML = HTML.replace("{channel_labels_json}", channel_labels_json)
+HTML = HTML.replace("{channel_installs_json}", channel_installs_json)
+HTML = HTML.replace("{channel_cpi_json}", channel_cpi_json)
+HTML = HTML.replace("{channel_ctr_json}", channel_ctr_json)
 
 # 生成用户指标表格行
 user_metrics_rows = ""
@@ -660,12 +757,24 @@ if ad_monetization:
             date_format_revenue[date][fmt] = 0
         date_format_revenue[date][fmt] += revenue
 
+    # 按日期和格式统计填充率
+    date_format_fillrate = {}
+    for row in ad_monetization:
+        date = row['date']
+        fmt = row['ad_format']
+        fillrate = float(row['fill_rate'])
+        if date not in date_format_fillrate:
+            date_format_fillrate[date] = {}
+        if fmt not in date_format_fillrate[date]:
+            date_format_fillrate[date][fmt] = []
+        date_format_fillrate[date][fmt].append(fillrate)
+
     sorted_dates = sorted(unique_dates)
     format_names = sorted(ad_format_stats.keys())
 
     revenue_dates_json = str(sorted_dates).replace("'", '"')
 
-    # 为每个格式生成数据序列
+    # 为每个格式生成收入数据序列
     revenue_datasets = []
     colors = ['#4a6cf7', '#2ecc71', '#f39c12']
     for i, fmt in enumerate(format_names):
@@ -676,11 +785,27 @@ if ad_monetization:
             'color': colors[i % len(colors)]
         })
 
-    # 生成 JSON 格式的数据集
-    datasets_json = []
+    # 为每个格式生成填充率数据序列
+    fillrate_datasets = []
+    for i, fmt in enumerate(format_names):
+        fmt_fillrate = []
+        for d in sorted_dates:
+            if d in date_format_fillrate and fmt in date_format_fillrate[d]:
+                avg_fillrate = round(sum(date_format_fillrate[d][fmt]) / len(date_format_fillrate[d][fmt]) * 100, 1)
+            else:
+                avg_fillrate = 0
+            fmt_fillrate.append(avg_fillrate)
+        fillrate_datasets.append({
+            'fmt': fmt,
+            'data': fmt_fillrate,
+            'color': colors[i % len(colors)]
+        })
+
+    # 生成收入 JSON 格式的数据集
+    revenue_datasets_json = []
     for ds in revenue_datasets:
         color_rgb = ds['color']
-        datasets_json.append(f"""{{
+        revenue_datasets_json.append(f"""{{
       label: '{ds['fmt']}',
       data: {str(ds['data'])},
       borderColor: '{color_rgb}',
@@ -689,10 +814,29 @@ if ad_monetization:
       fill: true,
       tension: 0.4,
       pointRadius: 4,
+      pointBackgroundColor: '{color_rgb}',
+      yAxisID: 'y1'
+    }}""")
+
+    datasets_js = ','.join(revenue_datasets_json)
+
+    # 生成填充率 JSON 格式的数据集
+    fillrate_datasets_json = []
+    for ds in fillrate_datasets:
+        color_rgb = ds['color']
+        fillrate_datasets_json.append(f"""{{
+      label: '{ds['fmt']}',
+      data: {str(ds['data'])},
+      borderColor: '{color_rgb}',
+      backgroundColor: 'rgba({color_to_rgba(color_rgb)})',
+      borderWidth: 2,
+      fill: false,
+      tension: 0.4,
+      pointRadius: 4,
       pointBackgroundColor: '{color_rgb}'
     }}""")
 
-    datasets_js = ','.join(datasets_json)
+    fillrate_datasets_js = ','.join(fillrate_datasets_json)
 
     ad_formats_json = str(ad_formats).replace("'", '"')
     ad_impressions_json = str(ad_impressions)
@@ -705,6 +849,7 @@ else:
     ad_ecpms_json = '[]'
     revenue_dates_json = '[]'
     datasets_js = ''
+    fillrate_datasets_js = ''
 
 HTML = HTML.replace("{ad_formats_json}", ad_formats_json)
 HTML = HTML.replace("{ad_impressions_json}", ad_impressions_json)
@@ -712,6 +857,43 @@ HTML = HTML.replace("{ad_revenues_json}", ad_revenues_json)
 HTML = HTML.replace("{ad_ecpms_json}", ad_ecpms_json)
 HTML = HTML.replace("{revenue_dates_json}", revenue_dates_json)
 HTML = HTML.replace("{datasets_js}", datasets_js)
+HTML = HTML.replace("{fillrate_datasets_js}", fillrate_datasets_js)
+
+# 生成动态的 insights
+insights_html = ""
+
+# 渠道相关 insight
+if channel_data:
+    # 找出 CPI 最低和最高的渠道
+    cpi_channels = [(ch, ch_data['cost'] / ch_data['installs'] if ch_data['installs'] > 0 else 0) for ch, ch_data in channel_data.items()]
+    cpi_channels.sort(key=lambda x: x[1])
+    lowest_cpi_channel = cpi_channels[0]
+    highest_cpi_channel = cpi_channels[-1]
+
+    # 找出新增用户最多的渠道
+    max_installs_channel = max(channel_data.items(), key=lambda x: x[1]['installs'])
+
+    insights_html += f"""<li><span class="highlight">渠道效率</span>：{lowest_cpi_channel[0]} CPI 最优（${lowest_cpi_channel[1]:.2f}），相比 {highest_cpi_channel[0]} 低 {(highest_cpi_channel[1] - lowest_cpi_channel[1]) / highest_cpi_channel[1] * 100:.1f}%，建议加大投放力度</li>"""
+    insights_html += f"""<li><span class="highlight">获客贡献</span>：{max_installs_channel[0]} 新增用户最多（{max_installs_channel[1]['installs']:,} 人），占总获客量的主要份额</li>"""
+
+# 关卡相关 insight
+if level_data:
+    # 找出通过率最低的关卡
+    level_pass_rates_dict = {}
+    for level, data in level_data.items():
+        rate = (data['completions'] / data['attempts'] * 100) if data['attempts'] > 0 else 0
+        level_pass_rates_dict[level] = rate
+
+    lowest_pass_level = min(level_pass_rates_dict.items(), key=lambda x: x[1])
+    insights_html += f"""<li><span class="highlight">难度优化</span>：Level {lowest_pass_level[0]} 通过率最低（{lowest_pass_level[1]:.1f}%），用户卡关严重，建议优化关卡难度</li>"""
+
+# 用户数据相关 insight
+if user_metrics:
+    avg_dau = sum(int(row['dau']) for row in user_metrics) / len(user_metrics)
+    avg_retention = sum(float(row['retention_d1']) for row in user_metrics) / len(user_metrics) * 100
+    insights_html += f"""<li><span class="highlight">用户活跃</span>：平均 DAU 为 {avg_dau:,.0f}，次日平均留存 {avg_retention:.1f}%，用户粘性稳定</li>"""
+
+HTML = HTML.replace("{insights_html}", insights_html)
 
 os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
 os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)

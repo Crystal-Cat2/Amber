@@ -3,7 +3,10 @@
     "Bigquery-Server": {
       "type": "http",
       "url": "http://10.0.0.36:8199/mcp",
-      "headersHelper": "python C:/Users/ASUS/.claude/skills/bq-refresh-token/scripts/get_mcp_headers.py"
+      "headersHelper": "python C:/Users/ASUS/.claude/skills/bq-refresh-token/scripts/get_mcp_headers.py",
+      "headers": {
+        "x-lark-token": "u-cxWJQ8X45bCFYd15EoS_2Rkl7c7kl5qPpoEa7N6yy86X"
+      }
     }
   }
 }

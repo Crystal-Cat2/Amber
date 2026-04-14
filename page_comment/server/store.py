@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "page_comment.db")
@@ -12,6 +13,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     page_key TEXT NOT NULL,
     page_url TEXT,
     cli_session_id TEXT,
+    model_provider TEXT,
     title TEXT,
     is_active INTEGER DEFAULT 1,
     created_at TEXT,
@@ -38,16 +40,35 @@ CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
 """
 
 
+def _migrate_db():
+    """增量迁移：检查并添加新列"""
+    with _connect() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "parent_session_id" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT")
+        if "creator_session_id" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN creator_session_id TEXT")
+        if "session_type" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'normal'")
+        if "model_provider" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN model_provider TEXT")
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+@contextmanager
 def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -73,22 +94,30 @@ def get_session(session_id: str) -> dict | None:
         return dict(row) if row else None
 
 
-def create_session(page_key: str, page_url: str = None, cli_session_id: str = None) -> dict:
+def create_session(page_key: str, page_url: str = None, cli_session_id: str = None,
+                   parent_session_id: str = None, creator_session_id: str = None,
+                   session_type: str = "normal", model_provider: str | None = None) -> dict:
     now = _now()
     session = {
         "id": str(uuid.uuid4()),
         "page_key": page_key,
         "page_url": page_url,
         "cli_session_id": cli_session_id,
+        "model_provider": model_provider,
         "title": None,
         "is_active": 1,
         "created_at": now,
         "updated_at": now,
+        "parent_session_id": parent_session_id,
+        "creator_session_id": creator_session_id,
+        "session_type": session_type,
     }
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, page_key, page_url, cli_session_id, title, is_active, created_at, updated_at) "
-            "VALUES (:id, :page_key, :page_url, :cli_session_id, :title, :is_active, :created_at, :updated_at)",
+            "INSERT INTO sessions (id, page_key, page_url, cli_session_id, model_provider, title, is_active, "
+            "created_at, updated_at, parent_session_id, creator_session_id, session_type) "
+            "VALUES (:id, :page_key, :page_url, :cli_session_id, :model_provider, :title, :is_active, "
+            ":created_at, :updated_at, :parent_session_id, :creator_session_id, :session_type)",
             session,
         )
     return session
@@ -100,6 +129,29 @@ def deactivate_sessions(page_key: str):
             "UPDATE sessions SET is_active=0, updated_at=? WHERE page_key=? AND is_active=1",
             (_now(), page_key),
         )
+
+
+def deactivate_session(session_id: str):
+    """停用单个会话"""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE sessions SET is_active=0, updated_at=? WHERE id=?",
+            (_now(), session_id),
+        )
+
+
+def fork_session(parent_session_id: str, page_key: str, page_url: str = None) -> dict:
+    """创建 fork 会话，继承父会话的 cli_session_id"""
+    parent = get_session(parent_session_id)
+    if not parent:
+        raise ValueError("父会话不存在")
+    return create_session(
+        page_key=page_key,
+        page_url=page_url,
+        cli_session_id=parent.get("cli_session_id"),
+        parent_session_id=parent_session_id,
+        session_type="forked",
+    )
 
 
 def update_session(session_id: str, **kwargs):
@@ -180,3 +232,4 @@ def get_thread_id(message_id: str) -> str | None:
 
 # 启动时初始化
 init_db()
+_migrate_db()

@@ -108,6 +108,45 @@ class ProcessorRefactorTests(unittest.TestCase):
         changed = processor._detect_changes(before, after)
         self.assertEqual(changed, [file_b])
 
+    def test_build_generic_prompt_prefers_feishu_target_context(self):
+        prompt = processor._build_generic_prompt_cli(
+            {
+                "selected_text": "",
+                "comment": "把这个对象改一下",
+                "page_title": "飞书文档",
+                "page_url": "https://xwbo3y4nxr.feishu.cn/docx/AIzedZyZZoX5vtxM3UKcHKsQnyh",
+                "page_context": {
+                    "mode": "visible_main",
+                    "content": "这是整页摘要，不该作为主上下文",
+                    "truncated": False,
+                },
+                "target_context": {
+                    "page_type": "feishu_doc",
+                    "target_type": "table",
+                    "target_text": "命中的表格摘要",
+                    "surrounding_blocks": ["结果", "AA 实验确认"],
+                    "object_meta": {
+                        "title": "广告格式表",
+                        "tokens": [{"kind": "sheet", "token": "shtcn123"}],
+                    },
+                },
+                "visual_context": {
+                    "format": "png",
+                    "width": 420,
+                    "height": 220,
+                    "file_path": r"D:\Work\Amber\page_comment\.tmp\feishu_target.png",
+                },
+            }
+        )
+
+        self.assertIn("飞书页面命中对象", prompt)
+        self.assertIn("target_type: table", prompt)
+        self.assertIn("命中的表格摘要", prompt)
+        self.assertIn("广告格式表", prompt)
+        self.assertIn("shtcn123", prompt)
+        self.assertIn(r"D:\Work\Amber\page_comment\.tmp\feishu_target.png", prompt)
+        self.assertNotIn("这是整页摘要，不该作为主上下文", prompt)
+
     def test_resolve_session_prefers_requested_session_when_page_key_matches(self):
         requested = {"id": "s-1", "page_key": "demo::page.html", "cli_session_id": "cli-1"}
         with mock.patch.object(processor.store, "get_session", return_value=requested) as get_session:
@@ -117,6 +156,24 @@ class ProcessorRefactorTests(unittest.TestCase):
         self.assertEqual(result, requested)
         get_session.assert_called_once_with("s-1")
         get_active.assert_not_called()
+
+    def test_resolve_page_key_prefers_meta_page_key(self):
+        page_key = processor._resolve_page_key(
+            "https://10.0.0.252:11005/page/123?from=share#top",
+            {"page_key": "ad_kill/scripts/run_user_distribution_dashboard.py::ad_kill_user_distribution.html"},
+            None,
+        )
+        self.assertEqual(page_key, "ad_kill/scripts/run_user_distribution_dashboard.py::ad_kill_user_distribution.html")
+
+    def test_build_resume_command_uses_provider_specific_syntax(self):
+        self.assertEqual(
+            processor._build_resume_command("claude", "session-1"),
+            [r"C:\Users\ASUS\.local\bin\claude.exe", "--resume", "session-1"],
+        )
+        self.assertEqual(
+            processor._build_resume_command("codex", "session-2"),
+            ["codex", "exec", "--json", "--full-auto", "--skip-git-repo-check", "resume", "session-2"],
+        )
 
     def test_process_comment_amber_dashboard_uses_cli_direct_edit_and_reload(self):
         async def run_case():
@@ -140,7 +197,7 @@ class ProcessorRefactorTests(unittest.TestCase):
                 with mock.patch.object(processor.store, "get_session", return_value=None):
                     with mock.patch.object(processor.store, "get_active_session", return_value=session):
                         with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-1"}]) as add_message:
-                            with mock.patch.object(processor, "_call_claude_cli", return_value=("已把图表改成折线图。", "cli-session-1")) as call_cli:
+                            with mock.patch.object(processor, "_call_cli", return_value=("已把图表改成折线图。", "cli-session-1")) as call_cli:
                                 with mock.patch.object(processor, "_snapshot_files", side_effect=[
                                     {"a.py": "old"},
                                     {"a.py": "new"},
@@ -163,13 +220,197 @@ class ProcessorRefactorTests(unittest.TestCase):
             self.assertEqual(result["action"], "reload")
             self.assertEqual(result["session_id"], "session-1")
             self.assertEqual(result["page_key"], session["page_key"])
-            self.assertIn(("editing", "正在让模型直接修改源文件..."), statuses)
+            self.assertIn(("editing", "Claude 正在思考..."), statuses)
             call_cli.assert_called_once()
             regenerate.assert_called_once()
             cleanup.assert_called_once()
             assistant_call = add_message.call_args_list[-1]
             self.assertIn('["a.py"]', assistant_call.kwargs["edits_json"])
             self.assertEqual(assistant_call.kwargs["edit_success"], 1)
+
+        import asyncio
+
+        asyncio.run(run_case())
+
+    def test_process_comment_generic_creates_session_and_returns_session_payload(self):
+        async def run_case():
+            statuses = []
+
+            async def status_callback(status, message):
+                statuses.append((status, message))
+
+            created_session = {
+                "id": "session-generic-1",
+                "page_key": "https://example.com/report",
+                "page_url": "https://example.com/report?from=share",
+                "cli_session_id": None,
+                "title": None,
+                "session_type": "normal",
+                "model_provider": None,
+            }
+            user_msg = {"id": "user-msg-1"}
+
+            with mock.patch.object(processor, "resolve_source", return_value=None):
+                with mock.patch.object(processor.store, "get_session", return_value=None):
+                    with mock.patch.object(processor.store, "get_active_session", return_value=None):
+                        with mock.patch.object(processor.store, "create_session", return_value=created_session) as create_session:
+                            with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-1"}]) as add_message:
+                                with mock.patch.object(processor.store, "update_session") as update_session:
+                                    with mock.patch.object(processor, "_call_cli", return_value=("已根据页面内容回答。", "cli-generic-1")) as call_cli:
+                                        result = await processor.process_comment(
+                                            {
+                                                "selected_text": "",
+                                                "comment": "帮我总结这个页面",
+                                                "page_url": "https://example.com/report?from=share#intro",
+                                                "page_title": "示例报告",
+                                                "page_context": {
+                                                    "mode": "visible_main",
+                                                    "content": "这是页面主体内容",
+                                                    "truncated": False,
+                                                },
+                                                "page_meta": {},
+                                                "model_provider": "codex",
+                                            },
+                                            status_callback,
+                                        )
+
+            self.assertEqual(result["session_id"], "session-generic-1")
+            self.assertEqual(result["cli_session_id"], "cli-generic-1")
+            self.assertEqual(result["session"]["id"], "session-generic-1")
+            self.assertEqual(result["session"]["cli_session_id"], "cli-generic-1")
+            self.assertEqual(result["session"]["title"], "帮我总结这个页面")
+            self.assertEqual(result["session"]["model_provider"], "codex")
+            create_session.assert_called_once_with("https://example.com/report", "https://example.com/report?from=share#intro", model_provider="codex")
+            call_cli.assert_called_once()
+            self.assertEqual(call_cli.call_args.args[1], None)
+            self.assertEqual(call_cli.call_args.kwargs["model_provider"], "codex")
+            update_session.assert_any_call("session-generic-1", cli_session_id="cli-generic-1")
+            update_session.assert_any_call("session-generic-1", title="帮我总结这个页面")
+            self.assertEqual(add_message.call_args_list[0].kwargs["session_id"], "session-generic-1")
+            self.assertEqual(add_message.call_args_list[1].kwargs["session_id"], "session-generic-1")
+            self.assertIn(("processing", "正在回答问题..."), statuses)
+
+        import asyncio
+
+        asyncio.run(run_case())
+
+    def test_process_comment_pagedoc_followup_resumes_requested_session(self):
+        async def run_case():
+            async def status_callback(_status, _message):
+                return None
+
+            requested_session = {
+                "id": "session-pagedoc-1",
+                "page_key": "https://xwbo3y4nxr.feishu.cn/docx/abcd",
+                "page_url": "https://xwbo3y4nxr.feishu.cn/docx/abcd",
+                "cli_session_id": "cli-pagedoc-1",
+                "title": "先前问题",
+                "session_type": "normal",
+                "model_provider": "claude",
+            }
+            user_msg = {"id": "user-msg-2"}
+
+            with mock.patch.object(processor, "resolve_source", return_value=None):
+                with mock.patch.object(processor.store, "get_session", return_value=requested_session) as get_session:
+                    with mock.patch.object(processor.store, "get_active_session") as get_active:
+                        with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-2"}]):
+                            with mock.patch.object(processor.store, "update_session") as update_session:
+                                with mock.patch.object(processor, "_call_cli", return_value=("继续回答。", "cli-pagedoc-1")) as call_cli:
+                                    result = await processor.process_comment(
+                                        {
+                                            "selected_text": "",
+                                            "comment": "继续",
+                                            "page_url": "https://xwbo3y4nxr.feishu.cn/docx/abcd?from=bookmark",
+                                            "page_title": "飞书文档",
+                                            "page_context": {
+                                                "mode": "visible_main",
+                                                "content": "文档可见内容",
+                                                "truncated": False,
+                                            },
+                                            "page_meta": {},
+                                            "session_id": "session-pagedoc-1",
+                                        },
+                                        status_callback,
+                                    )
+
+            self.assertEqual(result["session_id"], "session-pagedoc-1")
+            self.assertEqual(result["cli_session_id"], "cli-pagedoc-1")
+            self.assertEqual(result["session"]["id"], "session-pagedoc-1")
+            self.assertEqual(result["session"]["model_provider"], "claude")
+            get_session.assert_called_once_with("session-pagedoc-1")
+            get_active.assert_not_called()
+            call_cli.assert_called_once()
+            self.assertEqual(call_cli.call_args.args[1], "cli-pagedoc-1")
+            self.assertEqual(call_cli.call_args.kwargs["model_provider"], "claude")
+            update_session.assert_not_called()
+
+        import asyncio
+
+        asyncio.run(run_case())
+
+    def test_call_cli_returns_immediately_after_claude_result_event(self):
+        async def run_case():
+            class FakeStdin:
+                def __init__(self):
+                    self.closed = False
+                    self.payloads = []
+
+                def write(self, payload):
+                    self.payloads.append(payload)
+
+                async def drain(self):
+                    return None
+
+                def is_closing(self):
+                    return self.closed
+
+                def close(self):
+                    self.closed = True
+
+            class FakeStdout:
+                def __init__(self):
+                    self.calls = 0
+
+                async def readline(self):
+                    self.calls += 1
+                    if self.calls == 1:
+                        return (
+                            b'{"type":"result","result":"\\u5df2\\u5b8c\\u6210","is_error":false,'
+                            b'"session_id":"cli-session-1","duration_ms":1234}\n'
+                        )
+                    await asyncio.sleep(1)
+                    return b""
+
+            class FakeStderr:
+                async def read(self):
+                    return b""
+
+            class FakeProc:
+                def __init__(self):
+                    self.stdin = FakeStdin()
+                    self.stdout = FakeStdout()
+                    self.stderr = FakeStderr()
+                    self.returncode = 0
+
+                async def wait(self):
+                    return 0
+
+                def kill(self):
+                    self.returncode = -9
+
+            fake_proc = FakeProc()
+
+            with mock.patch.object(processor.asyncio, "create_subprocess_exec", return_value=fake_proc):
+                with mock.patch.object(processor, "CLI_TIMEOUT", 0.05):
+                    result_text, session_id = await processor._call_cli(
+                        "测试 prompt",
+                        cli_session_id="cli-session-1",
+                        cwd=r"D:\Work\Amber",
+                        model_provider="claude",
+                    )
+
+            self.assertEqual(result_text, "已完成")
+            self.assertEqual(session_id, "cli-session-1")
 
         import asyncio
 

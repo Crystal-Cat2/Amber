@@ -1,95 +1,116 @@
 -- ad_kill 实验：按第5关 ad_kill_scene 分组的关卡留存曲线
 -- 数据源：transferred.hudi_ods.ball_sort / ios_nuts_sort
 -- scene 判定：每用户第5关最晚的 game_new_start 或 game_win 事件的 ad_kill_scene
+-- 对 scene=none 的用户二次判定：有第5关杀广告事件的拆分为 other_kill1 / other_kill2+
+-- AB 分组：从同事件的 user_properties 提取，不额外扫 user_engagement
 -- 对象：所有到达第5关的用户（不区分新老）
 -- 输出：product, ab_group, scene_group, level, retained_users, total_users, retention_rate
 
--- ============================================================
--- Ball Sort: AB 分组
--- ============================================================
-WITH bs_user_ab AS (
+WITH level5_all_events AS (
   SELECT
+    'ball_sort' AS product,
     user_pseudo_id,
     CASE
       WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)12a($|_)'
+        LOWER((SELECT value.string_value FROM UNNEST(user_properties.array) WHERE key = 'game_model')),
+        r'(^|[^a-z0-9])(12a)([^a-z0-9]|$)'
       ) THEN 'A'
       WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)12b($|_)'
+        LOWER((SELECT value.string_value FROM UNNEST(user_properties.array) WHERE key = 'game_model')),
+        r'(^|[^a-z0-9])(12b)([^a-z0-9]|$)'
       ) THEN 'B'
-    END AS ab_group
+    END AS ab_group,
+    event_timestamp,
+    COALESCE(
+      (SELECT ep.value.string_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'ad_kill_scene'),
+      'none'
+    ) AS ad_kill_scene
   FROM `transferred.hudi_ods.ball_sort`
   WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
-    AND event_name = 'user_engagement'
-    AND (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1) IS NOT NULL
-  GROUP BY user_pseudo_id, ab_group
-  HAVING ab_group IS NOT NULL
-),
-
--- iOS Nuts Sort: AB 分组
-ns_user_ab AS (
-  SELECT
-    user_pseudo_id,
-    CASE
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2a($|_)'
-      ) THEN 'A'
-      WHEN REGEXP_CONTAINS(
-        (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1),
-        r'(^|_)2b($|_)'
-      ) THEN 'B'
-    END AS ab_group
-  FROM `transferred.hudi_ods.ios_nuts_sort`
-  WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
-    AND event_name = 'user_engagement'
-    AND (SELECT up.value.string_value FROM UNNEST(user_properties.array) AS up WHERE up.key = 'game_model' LIMIT 1) IS NOT NULL
-  GROUP BY user_pseudo_id, ab_group
-  HAVING ab_group IS NOT NULL
-),
-
--- ============================================================
--- 第5关所有 game_new_start / game_win 事件，取每用户最晚事件的 scene
--- ============================================================
-level5_all_events AS (
-  SELECT
-    'ball_sort' AS product, e.user_pseudo_id, ua.ab_group, e.event_timestamp,
-    COALESCE(
-      (SELECT ep.value.string_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'ad_kill_scene'),
-      'no_scene'
-    ) AS ad_kill_scene
-  FROM `transferred.hudi_ods.ball_sort` e
-  INNER JOIN bs_user_ab ua ON e.user_pseudo_id = ua.user_pseudo_id
-  WHERE e.event_date BETWEEN '2026-01-29' AND '2026-04-07'
-    AND e.event_name IN ('game_new_start', 'game_win')
-    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'levelid') = 5
-    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'activity_id') = 0
+    AND event_name IN ('game_new_start', 'game_win')
+    AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+    AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'activity_id') = 0
+    AND user_pseudo_id IS NOT NULL AND user_pseudo_id != ''
 
   UNION ALL
 
   SELECT
-    'ios_nuts_sort' AS product, e.user_pseudo_id, ua.ab_group, e.event_timestamp,
+    'ios_nuts_sort' AS product,
+    user_pseudo_id,
+    CASE
+      WHEN REGEXP_CONTAINS(
+        LOWER((SELECT value.string_value FROM UNNEST(user_properties.array) WHERE key = 'game_model')),
+        r'(^|[^a-z0-9])(2a)([^a-z0-9]|$)'
+      ) THEN 'A'
+      WHEN REGEXP_CONTAINS(
+        LOWER((SELECT value.string_value FROM UNNEST(user_properties.array) WHERE key = 'game_model')),
+        r'(^|[^a-z0-9])(2b)([^a-z0-9]|$)'
+      ) THEN 'B'
+    END AS ab_group,
+    event_timestamp,
     COALESCE(
-      (SELECT ep.value.string_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'ad_kill_scene'),
-      'no_scene'
+      (SELECT ep.value.string_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'ad_kill_scene'),
+      'none'
     ) AS ad_kill_scene
-  FROM `transferred.hudi_ods.ios_nuts_sort` e
-  INNER JOIN ns_user_ab ua ON e.user_pseudo_id = ua.user_pseudo_id
-  WHERE e.event_date BETWEEN '2026-01-29' AND '2026-04-07'
-    AND e.event_name IN ('game_new_start', 'game_win')
-    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'levelid') = 5
-    AND (SELECT ep.value.int_value FROM UNNEST(e.event_params.array) AS ep WHERE ep.key = 'activity_id') = 0
+  FROM `transferred.hudi_ods.ios_nuts_sort`
+  WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
+    AND event_name IN ('game_new_start', 'game_win')
+    AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+    AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'activity_id') = 0
+    AND user_pseudo_id IS NOT NULL AND user_pseudo_id != ''
 ),
 
-user_scene AS (
-  SELECT product, user_pseudo_id, ab_group, ad_kill_scene AS scene_group
+user_scene_raw AS (
+  SELECT product, user_pseudo_id, ab_group, ad_kill_scene
   FROM (
-    SELECT *, ROW_NUMBER() OVER (PARTITION BY product, user_pseudo_id, ab_group ORDER BY event_timestamp DESC) AS rn
+    SELECT *,
+      ROW_NUMBER() OVER (PARTITION BY product, user_pseudo_id ORDER BY event_timestamp DESC) AS rn
     FROM level5_all_events
+    WHERE ab_group IS NOT NULL
   )
   WHERE rn = 1
+),
+
+-- 对 scene=none 的用户，统计第5关杀广告次数
+none_user_kills AS (
+  SELECT us.product, us.user_pseudo_id, COUNT(e.event_name) AS kill_count
+  FROM user_scene_raw us
+  LEFT JOIN (
+    SELECT user_pseudo_id, event_name
+    FROM `transferred.hudi_ods.ball_sort`
+    WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
+      AND event_name = 'lib_fullscreen_ad_killed'
+      AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+  ) e ON us.user_pseudo_id = e.user_pseudo_id AND us.product = 'ball_sort'
+  WHERE us.ad_kill_scene = 'none' AND us.product = 'ball_sort'
+  GROUP BY us.product, us.user_pseudo_id
+
+  UNION ALL
+
+  SELECT us.product, us.user_pseudo_id, COUNT(e.event_name) AS kill_count
+  FROM user_scene_raw us
+  LEFT JOIN (
+    SELECT user_pseudo_id, event_name
+    FROM `transferred.hudi_ods.ios_nuts_sort`
+    WHERE event_date BETWEEN '2026-01-29' AND '2026-04-07'
+      AND event_name = 'lib_fullscreen_ad_killed'
+      AND (SELECT ep.value.int_value FROM UNNEST(event_params.array) AS ep WHERE ep.key = 'levelid') = 5
+  ) e ON us.user_pseudo_id = e.user_pseudo_id AND us.product = 'ios_nuts_sort'
+  WHERE us.ad_kill_scene = 'none' AND us.product = 'ios_nuts_sort'
+  GROUP BY us.product, us.user_pseudo_id
+),
+
+-- 最终 scene
+user_scene AS (
+  SELECT product, user_pseudo_id, ab_group,
+    CASE
+      WHEN ad_kill_scene != 'none' THEN ad_kill_scene
+      WHEN nk.kill_count = 1 THEN 'other_kill1'
+      WHEN nk.kill_count >= 2 THEN 'other_kill2+'
+      ELSE 'none'
+    END AS scene_group
+  FROM user_scene_raw us
+  LEFT JOIN none_user_kills nk USING (product, user_pseudo_id)
 ),
 
 -- ============================================================

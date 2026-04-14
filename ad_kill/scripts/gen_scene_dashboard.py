@@ -32,6 +32,7 @@ def pi(v):
 scene_all = read_csv('ad_kill_level5_scene_distribution.csv')
 survival_raw = read_csv('ad_kill_scene_level_survival.csv')
 kill_count_raw = read_csv('level5_kill_count_distribution.csv')
+lw_kill_count_raw = read_csv('long_watch_kill_count_distribution.csv')
 
 
 def build_scene_data(rows):
@@ -93,11 +94,13 @@ def build_kill_count_data(rows):
 scene_data = build_scene_data(scene_all)
 survival_data = build_survival_data(survival_raw)
 kill_count_data = build_kill_count_data(kill_count_raw)
+lw_kill_count_data = build_kill_count_data(lw_kill_count_raw)
 
 data_json = json.dumps({
     'scene': scene_data,
     'survival': survival_data,
     'killCount': kill_count_data,
+    'lwKillCount': lw_kill_count_data,
 }, ensure_ascii=False)
 
 # ============================================================
@@ -151,6 +154,8 @@ const COLOR_B = 'rgb(239, 68, 68)';
 const SCENE_COLORS = {
   'long_watch_kill': 'rgb(239, 68, 68)',
   'short_watch_repeat_kill': 'rgb(245, 158, 11)',
+  'other_kill1': 'rgb(99, 102, 241)',
+  'other_kill2+': 'rgb(168, 85, 247)',
   'no_ad_kill': 'rgb(34, 197, 94)',
   'none': 'rgb(34, 197, 94)',
   'no_scene': 'rgb(156, 163, 175)',
@@ -158,6 +163,8 @@ const SCENE_COLORS = {
 const SCENE_LABELS = {
   'long_watch_kill': '看≥10s后杀广告',
   'short_watch_repeat_kill': '同关卡累计杀≥2次',
+  'other_kill1': '其他杀广告(杀1次)',
+  'other_kill2+': '其他杀广告(杀≥2次)',
   'no_ad_kill': '无杀广告行为',
   'none': '无杀广告行为',
   'no_scene': '其他杀广告 (win插屏/<10s单次)',
@@ -195,7 +202,7 @@ function renderDauCards(product) {
 function renderSceneBar(product) {
   const canvasId = 'chartSceneUV';
   const sd = DATA.scene[product] || {};
-  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'no_scene'];
+  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'other_kill1', 'other_kill2+'];
   const labels = scenes.map(s => SCENE_LABELS[s] || s);
   const getRow = (ab, scene) => (sd[ab] || []).find(x => x.scene === scene);
   const dsA = scenes.map(s => { const r = getRow('A', s); return r ? r.uv_ratio : 0; });
@@ -313,6 +320,84 @@ function renderKillCountBar(product) {
       }
     }
   });
+}
+
+function renderLwKillCountBar(product) {
+  const canvasId = 'chartLwKillCount';
+  const kd = DATA.lwKillCount[product] || {};
+  const labels = [];
+  const dsA = [];
+  const dsB = [];
+  const userCountA = [];
+  const userCountB = [];
+
+  const aData = kd.A || [];
+  const bData = kd.B || [];
+  const bMap = {};
+  bData.forEach(d => { bMap[d.kill_count] = d; });
+
+  let ge4A = { user_ratio: 0, user_count: 0 };
+  let ge4B = { user_ratio: 0, user_count: 0 };
+
+  aData.forEach(d => {
+    if (d.kill_count < 3) {
+      labels.push('杀' + d.kill_count + '次');
+      dsA.push(d.user_ratio);
+      userCountA.push(d.user_count);
+      const bRow = bMap[d.kill_count];
+      dsB.push(bRow ? bRow.user_ratio : 0);
+      userCountB.push(bRow ? bRow.user_count : 0);
+    } else {
+      ge4A.user_ratio += d.user_ratio;
+      ge4A.user_count += d.user_count;
+      const bRow = bMap[d.kill_count];
+      if (bRow) {
+        ge4B.user_ratio += bRow.user_ratio;
+        ge4B.user_count += bRow.user_count;
+      }
+    }
+  });
+
+  if (ge4A.user_count > 0 || ge4B.user_count > 0) {
+    labels.push('杀3次以上');
+    dsA.push(ge4A.user_ratio);
+    userCountA.push(ge4A.user_count);
+    dsB.push(ge4B.user_ratio);
+    userCountB.push(ge4B.user_count);
+  }
+
+  const ctx = document.getElementById(canvasId);
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'A 组', data: dsA, backgroundColor: 'rgba(59,130,246,0.6)', borderColor: COLOR_A, borderWidth: 1, userCountData: userCountA },
+        { label: 'B 组', data: dsB, backgroundColor: 'rgba(239,68,68,0.6)', borderColor: COLOR_B, borderWidth: 1, userCountData: userCountB },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: 'long_watch_kill 用户杀广告次数分布', font: { size: 14 } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const userCount = ctx.dataset.userCountData[ctx.dataIndex];
+              return ctx.dataset.label + ': ' + (ctx.parsed.y * 100).toFixed(2) + '%  (用户数: ' + fmt(userCount) + ')';
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: '用户占比' },
+          ticks: { callback: v => (v * 100).toFixed(1) + '%' }
+        }
+      }
+    }
+  });
 }'''
 
 # ---- Survival chart functions ----
@@ -328,7 +413,20 @@ function makeLineChart(canvasId, labels, datasetsArr, yLabel, yPct) {
     data: { labels, datasets: datasetsArr },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top' } },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const val = ctx.parsed.y;
+              if (val == null) return '';
+              const retained = ctx.dataset.retainedData ? ctx.dataset.retainedData[ctx.dataIndex] : null;
+              const pct = (val * 100).toFixed(2) + '%';
+              return retained != null ? ctx.dataset.label + ': ' + pct + '  (人数: ' + fmt(retained) + ')' : ctx.dataset.label + ': ' + pct;
+            }
+          }
+        }
+      },
       interaction: { mode: 'index', intersect: false },
       scales: {
         y: {
@@ -347,7 +445,7 @@ function renderSurvivalByGroup(product) {
   const sv = DATA.survival[product];
   if (!sv) return;
   const maxLevel = getMaxLevel();
-  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'none', 'no_scene'];
+  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'other_kill1', 'other_kill2+', 'none'];
 
   for (const ab of ['A', 'B']) {
     const canvasId = 'chartSurvival' + ab;
@@ -363,10 +461,12 @@ function renderSurvivalByGroup(product) {
     for (const sg of scenes) {
       const sgData = abData[sg] || [];
       const dataMap = {};
-      sgData.forEach(d => { dataMap[d.level] = d.retention_rate; });
+      const retainedMap = {};
+      sgData.forEach(d => { dataMap[d.level] = d.retention_rate; retainedMap[d.level] = d.retained_users; });
       datasets.push({
         label: SCENE_LABELS[sg] || sg,
         data: levels.map(l => dataMap[l] || null),
+        retainedData: levels.map(l => retainedMap[l] || null),
         borderColor: SCENE_COLORS[sg] || '#999',
         backgroundColor: 'transparent',
         tension: 0.1,
@@ -385,7 +485,7 @@ function renderSurvivalAB(product) {
   const sv = DATA.survival[product];
   if (!sv) return;
   const maxLevel = getMaxLevel();
-  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'none', 'no_scene'];
+  const scenes = ['long_watch_kill', 'short_watch_repeat_kill', 'other_kill1', 'other_kill2+', 'none'];
   const container = document.getElementById('survivalAbContainer');
   container.innerHTML = '';
 
@@ -401,7 +501,8 @@ function renderSurvivalAB(product) {
     const aData = ((sv.A || {})[sg] || []).filter(d => d.level <= maxLevel);
     const bData = ((sv.B || {})[sg] || []).filter(d => d.level <= maxLevel);
     const bMap = {};
-    bData.forEach(d => { bMap[d.level] = d.retention_rate; });
+    const bRetainedMap = {};
+    bData.forEach(d => { bMap[d.level] = d.retention_rate; bRetainedMap[d.level] = d.retained_users; });
     const labels = aData.map(d => '' + d.level);
     const gapData = aData.map(d => {
       const bVal = bMap[d.level];
@@ -412,6 +513,7 @@ function renderSurvivalAB(product) {
       {
         label: 'A 组',
         data: aData.map(d => d.retention_rate),
+        retainedData: aData.map(d => d.retained_users),
         borderColor: COLOR_A,
         backgroundColor: 'transparent',
         tension: 0.1,
@@ -420,6 +522,7 @@ function renderSurvivalAB(product) {
       {
         label: 'B 组',
         data: aData.map(d => bMap[d.level] ?? null),
+        retainedData: aData.map(d => bRetainedMap[d.level] ?? null),
         borderColor: COLOR_B,
         backgroundColor: 'transparent',
         tension: 0.1,
@@ -450,10 +553,12 @@ function renderSurvivalAB(product) {
               label: function(ctx) {
                 const val = ctx.parsed.y;
                 if (val == null) return '';
+                const retained = ctx.dataset.retainedData ? ctx.dataset.retainedData[ctx.dataIndex] : null;
                 if (ctx.dataset.yAxisID === 'y1') {
                   return ctx.dataset.label + ': ' + (val >= 0 ? '+' : '') + (val * 100).toFixed(2) + '%';
                 }
-                return ctx.dataset.label + ': ' + (val * 100).toFixed(2) + '%';
+                const pct = (val * 100).toFixed(2) + '%';
+                return retained != null ? ctx.dataset.label + ': ' + pct + '  (人数: ' + fmt(retained) + ')' : ctx.dataset.label + ': ' + pct;
               }
             }
           },
@@ -483,6 +588,7 @@ function render() {
   renderDauCards(product);
   renderSceneBar(product);
   renderKillCountBar(product);
+  renderLwKillCountBar(product);
   renderSurvivalByGroup(product);
   renderSurvivalAB(product);
 }
@@ -570,8 +676,9 @@ __CSS__
   <h2>第5关 DAU 概览</h2>
   <div class="cards" id="dauCards"></div>
   <div class="chart-row">
-    <div class="chart-half"><canvas id="chartSceneUV"></canvas></div>
-    <div class="chart-half"><canvas id="chartKillCount"></canvas></div>
+    <div class="chart-third"><canvas id="chartSceneUV"></canvas></div>
+    <div class="chart-third"><canvas id="chartKillCount"></canvas></div>
+    <div class="chart-third"><canvas id="chartLwKillCount"></canvas></div>
   </div>
 </div>
 
