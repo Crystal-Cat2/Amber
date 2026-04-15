@@ -40,7 +40,9 @@
   let currentPageKey = null;
   let pendingCommentId = null;
   let pendingTimeoutId = null;
+  let pendingResultPollId = null;
   const PENDING_TIMEOUT_MS = 120000; // 2分钟超时
+  const PENDING_RESULT_POLL_MS = 5000;
   let allSessions = [];
   let batchMode = false;
   let commentQueue = [];  // [{selected_text, comment, chart_info?, rect?, markerEl?}]
@@ -438,7 +440,10 @@
 
   function getActiveSessionModelProvider() {
     const currentSession = allSessions.find((session) => session.id === currentSessionId);
-    return currentSession?.model_provider || currentModelProvider || "claude";
+    if (typeof chartUtils.resolveModelProvider === "function") {
+      return chartUtils.resolveModelProvider(currentModelProvider, currentSession?.model_provider);
+    }
+    return currentModelProvider || currentSession?.model_provider || "claude";
   }
 
   function upsertSession(session, messages) {
@@ -793,6 +798,22 @@
     sidebarEl?.querySelector(".pc-interaction")?.remove();
   }
 
+  function clearPendingResultPoll() {
+    if (pendingResultPollId) {
+      clearTimeout(pendingResultPollId);
+      pendingResultPollId = null;
+    }
+  }
+
+  function schedulePendingResultPoll(delay = PENDING_RESULT_POLL_MS) {
+    clearPendingResultPoll();
+    if (!pendingCommentId) return;
+    pendingResultPollId = setTimeout(() => {
+      if (!pendingCommentId) return;
+      pollForResult();
+    }, delay);
+  }
+
   function renderInteraction(data) {
     const body = sidebarEl?.querySelector(".pc-sidebar-body");
     if (!body) return;
@@ -938,6 +959,11 @@
     if (msg.type === "status" && msg.id) {
       if (msg.id === pendingCommentId) {
         startPendingTimeout(); // 收到状态说明服务端仍在工作，重置超时
+        if (typeof chartUtils.shouldScheduleResultPoll === "function"
+          ? chartUtils.shouldScheduleResultPoll(msg.status)
+          : true) {
+          schedulePendingResultPoll();
+        }
         if (msg.status === "interaction") {
           // 交互事件：渲染选项卡片
           try {
@@ -961,6 +987,7 @@
         appendChatMessage(isError ? "system" : "assistant", msg.response);
         pendingCommentId = null;
         clearPendingTimeout();
+        clearPendingResultPoll();
         enableChatInput();
       }
 
@@ -996,12 +1023,12 @@
 
     // 轮询返回空 = 还在处理中，继续轮询
     if (msg.type === "poll_empty" && pendingCommentId) {
-      setTimeout(pollForResult, 3000);
+      schedulePendingResultPoll(3000);
     }
 
     // 连接恢复时，如果有 pending 请求，轮询结果
     if (msg.type === "connection_status" && msg.connected && pendingCommentId) {
-      setTimeout(pollForResult, 500);
+      schedulePendingResultPoll(500);
     }
 
     if (msg.type === "history") renderHistory(msg.sessions);
@@ -1047,6 +1074,7 @@
       removeInteractionCard();
       pendingCommentId = null;
       clearPendingTimeout();
+      clearPendingResultPoll();
       enableChatInput();
       // 标记所有项为完成
       const results = msg.results || [];
@@ -1089,6 +1117,7 @@
         appendChatMessage("system", msg.message || "服务器处理出错");
         pendingCommentId = null;
         clearPendingTimeout();
+        clearPendingResultPoll();
         enableChatInput();
       }
     }
@@ -1408,10 +1437,15 @@
     clearPendingTimeout();
     pendingTimeoutId = setTimeout(() => {
       if (!pendingCommentId) return;
-      removeTypingIndicator();
-      appendChatMessage("system", "请求超时，请重试");
-      pendingCommentId = null;
-      enableChatInput();
+      pollForResult();
+      pendingTimeoutId = setTimeout(() => {
+        if (!pendingCommentId) return;
+        removeTypingIndicator();
+        appendChatMessage("system", "请求超时，请重试");
+        pendingCommentId = null;
+        clearPendingResultPoll();
+        enableChatInput();
+      }, 5000);
     }, PENDING_TIMEOUT_MS);
   }
 
@@ -1426,6 +1460,7 @@
     if (!pendingCommentId) return;
     removeTypingIndicator();
     clearPendingTimeout();
+    clearPendingResultPoll();
     appendChatMessage("system", "已取消请求");
     pendingCommentId = null;
     enableChatInput();

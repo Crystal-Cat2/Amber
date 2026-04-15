@@ -172,8 +172,174 @@ class ProcessorRefactorTests(unittest.TestCase):
         )
         self.assertEqual(
             processor._build_resume_command("codex", "session-2"),
-            ["codex", "exec", "--json", "--full-auto", "--skip-git-repo-check", "resume", "session-2"],
+            list(processor.CODEX_CLI) + ["exec", "--json", "--full-auto", "--skip-git-repo-check", "resume", "session-2"],
         )
+
+    def test_handle_non_amber_switches_existing_session_to_requested_provider(self):
+        async def run_case():
+            async def status_callback(_status, _message):
+                return None
+
+            session = {
+                "id": "session-generic-2",
+                "page_key": "https://example.com/report",
+                "page_url": "https://example.com/report",
+                "cli_session_id": "claude-session-1",
+                "title": "旧会话",
+                "session_type": "normal",
+                "model_provider": "claude",
+            }
+            user_msg = {"id": "user-msg-switch-provider"}
+
+            with mock.patch.object(processor, "resolve_source", return_value=None):
+                with mock.patch.object(processor.store, "get_session", return_value=session):
+                    with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-1"}]):
+                        with mock.patch.object(processor.store, "update_session") as update_session:
+                            with mock.patch.object(processor, "_call_cli", return_value=("已切到 Codex。", "codex-session-1")) as call_cli:
+                                result = await processor.process_comment(
+                                    {
+                                        "selected_text": "",
+                                        "comment": "继续处理",
+                                        "page_url": "https://example.com/report?from=share#intro",
+                                        "page_title": "示例报告",
+                                        "page_context": {
+                                            "mode": "visible_main",
+                                            "content": "这是页面主体内容",
+                                            "truncated": False,
+                                        },
+                                        "page_meta": {},
+                                        "session_id": "session-generic-2",
+                                        "model_provider": "codex",
+                                    },
+                                    status_callback,
+                                )
+
+            self.assertEqual(result["session"]["model_provider"], "codex")
+            self.assertEqual(result["session"]["cli_session_id"], "codex-session-1")
+            self.assertEqual(call_cli.call_args.args[1], None)
+            self.assertEqual(call_cli.call_args.kwargs["model_provider"], "codex")
+            update_session.assert_any_call("session-generic-2", model_provider="codex", cli_session_id=None)
+            update_session.assert_any_call("session-generic-2", cli_session_id="codex-session-1")
+
+        import asyncio
+
+        asyncio.run(run_case())
+
+    def test_process_comment_returns_friendly_message_for_stale_resume_error(self):
+        async def run_case():
+            async def status_callback(_status, _message):
+                return None
+
+            source_info = {
+                "script_path": r"D:\Work\Amber\ad_kill\scripts\run_user_distribution_dashboard.py",
+                "csv_files": [r"D:\Work\Amber\ad_kill\data\ad_kill_dau_user_composition.csv"],
+                "data_dir": r"D:\Work\Amber\ad_kill\data",
+                "output_html": r"D:\Work\Amber\ad_kill\outputs\ad_kill_user_distribution.html",
+                "project_root": r"D:\Work\Amber\ad_kill",
+            }
+            session = {
+                "id": "session-stale-1",
+                "page_key": "ad_kill/scripts/run_user_distribution_dashboard.py::ad_kill_user_distribution.html",
+                "cli_session_id": "stale-session-1",
+                "title": None,
+                "model_provider": "claude",
+            }
+            user_msg = {"id": "user-msg-stale-1"}
+
+            with mock.patch.object(processor, "resolve_source", return_value=source_info):
+                with mock.patch.object(processor.store, "get_session", return_value=None):
+                    with mock.patch.object(processor.store, "get_active_session", return_value=session):
+                        with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-1"}]):
+                            with mock.patch.object(processor, "_get_modifiable_files", return_value=["a.py"]):
+                                with mock.patch.object(processor, "_snapshot_files", return_value={"a.py": "old"}):
+                                    with mock.patch.object(processor, "_backup_files", return_value={"a.py": "a.py.pc_backup"}):
+                                        with mock.patch.object(processor, "_cleanup_backups"):
+                                            with mock.patch.object(
+                                                processor,
+                                                "_call_cli",
+                                                side_effect=RuntimeError(
+                                                    "claude CLI 返回错误: No conversation found with session ID: stale-session-1"
+                                                ),
+                                            ):
+                                                result = await processor.process_comment(
+                                                    {
+                                                        "selected_text": "图表附近文字",
+                                                        "comment": "改一下",
+                                                        "page_url": "file:///D:/Work/Amber/ad_kill/outputs/ad_kill_user_distribution.html",
+                                                        "page_title": "Ad Kill 用户分布",
+                                                        "page_meta": {"source_script": "ad_kill/scripts/run_user_distribution_dashboard.py"},
+                                                    },
+                                                    status_callback,
+                                                )
+
+            self.assertIn("无法续用会话", result["response"])
+            self.assertEqual(result["action"], "none")
+            self.assertEqual(result["cli_session_id"], "stale-session-1")
+
+        import asyncio
+
+        asyncio.run(run_case())
+
+    def test_process_comment_skips_creator_session_auto_link_for_codex(self):
+        async def run_case():
+            async def status_callback(_status, _message):
+                return None
+
+            source_info = {
+                "script_path": r"D:\Work\Amber\ad_kill\scripts\run_user_distribution_dashboard.py",
+                "csv_files": [r"D:\Work\Amber\ad_kill\data\ad_kill_dau_user_composition.csv"],
+                "data_dir": r"D:\Work\Amber\ad_kill\data",
+                "output_html": r"D:\Work\Amber\ad_kill\outputs\ad_kill_user_distribution.html",
+                "project_root": r"D:\Work\Amber\ad_kill",
+            }
+            session = {
+                "id": "session-codex-creator-1",
+                "page_key": "ad_kill/scripts/run_user_distribution_dashboard.py::ad_kill_user_distribution.html",
+                "cli_session_id": None,
+                "title": None,
+                "session_type": "normal",
+                "model_provider": "codex",
+            }
+            user_msg = {"id": "user-msg-codex-creator-1"}
+
+            with mock.patch.object(processor, "resolve_source", return_value=source_info):
+                with mock.patch.object(processor.store, "get_session", return_value=session):
+                    with mock.patch.object(processor.store, "add_message", side_effect=[user_msg, {"id": "assistant-msg-1"}]):
+                        with mock.patch.object(processor.store, "update_session") as update_session:
+                            with mock.patch.object(processor, "_get_modifiable_files", return_value=["a.py"]):
+                                with mock.patch.object(processor, "_snapshot_files", side_effect=[{"a.py": "old"}, {"a.py": "old"}]):
+                                    with mock.patch.object(processor, "_backup_files", return_value={"a.py": "a.py.pc_backup"}):
+                                        with mock.patch.object(processor, "_cleanup_backups"):
+                                            with mock.patch.object(processor, "_call_cli", return_value=("已处理", "codex-session-2")) as call_cli:
+                                                result = await processor.process_comment(
+                                                    {
+                                                        "selected_text": "图表附近文字",
+                                                        "comment": "改一下",
+                                                        "page_url": "file:///D:/Work/Amber/ad_kill/outputs/ad_kill_user_distribution.html",
+                                                        "page_title": "Ad Kill 用户分布",
+                                                        "page_meta": {
+                                                            "source_script": "ad_kill/scripts/run_user_distribution_dashboard.py",
+                                                            "creator_session": "claude-creator-session",
+                                                        },
+                                                        "session_id": "session-codex-creator-1",
+                                                        "model_provider": "codex",
+                                                    },
+                                                    status_callback,
+                                                )
+
+            self.assertEqual(result["session"]["model_provider"], "codex")
+            self.assertEqual(call_cli.call_args.args[1], None)
+            update_session.assert_any_call("session-codex-creator-1", cli_session_id="codex-session-2")
+            self.assertFalse(
+                any(
+                    kwargs.get("cli_session_id") == "claude-creator-session"
+                    for _args, kwargs in update_session.call_args_list
+                )
+            )
+
+        import asyncio
+
+        asyncio.run(run_case())
 
     def test_process_comment_amber_dashboard_uses_cli_direct_edit_and_reload(self):
         async def run_case():
@@ -220,7 +386,7 @@ class ProcessorRefactorTests(unittest.TestCase):
             self.assertEqual(result["action"], "reload")
             self.assertEqual(result["session_id"], "session-1")
             self.assertEqual(result["page_key"], session["page_key"])
-            self.assertIn(("editing", "Claude 正在思考..."), statuses)
+            self.assertIn(("editing", "AI 正在思考..."), statuses)
             call_cli.assert_called_once()
             regenerate.assert_called_once()
             cleanup.assert_called_once()

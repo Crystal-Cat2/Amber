@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from urllib.parse import urlsplit, urlunsplit
 
 from config import (
@@ -28,6 +29,7 @@ log = logging.getLogger("processor")
 
 PAGEDOC_HOST = "10.0.0.54:12005"
 VISUAL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp", "page_comment_visuals")
+RUNTIME_TMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".tmp")
 
 
 def _read_csv_preview(csv_path: str, max_rows: int = 5) -> str:
@@ -356,14 +358,25 @@ def _normalize_model_provider(model_provider: str | None) -> str:
 
 
 def _ensure_session_model_provider(session: dict, requested_provider: str | None) -> dict:
-    inferred_provider = session.get("model_provider")
+    requested = _normalize_model_provider(requested_provider) if requested_provider else None
+    current = session.get("model_provider")
+    inferred_provider = current
     if not inferred_provider and session.get("cli_session_id"):
         inferred_provider = DEFAULT_MODEL_PROVIDER
-    provider = _normalize_model_provider(inferred_provider or requested_provider or DEFAULT_MODEL_PROVIDER)
-    if session.get("model_provider") == provider:
+    provider = requested or _normalize_model_provider(inferred_provider or DEFAULT_MODEL_PROVIDER)
+
+    updates = {}
+    if current != provider:
+        updates["model_provider"] = provider
+    if requested and current and _normalize_model_provider(current) != requested and session.get("cli_session_id"):
+        log.info("切换模型 provider: %s -> %s，清空旧 CLI session %s", current, requested, session.get("cli_session_id"))
+        updates["cli_session_id"] = None
+    if not updates:
         return session
-    store.update_session(session["id"], model_provider=provider)
-    return _merge_session_state(session, model_provider=provider)
+    store.update_session(session["id"], **updates)
+    merged = dict(session)
+    merged.update(updates)
+    return merged
 
 
 def _save_cli_session(session: dict, cli_session_id: str | None) -> dict:
@@ -391,13 +404,38 @@ def _build_resume_command(model_provider: str, cli_session_id: str) -> list[str]
     return list(CLAUDE_CLI if isinstance(CLAUDE_CLI, list) else [CLAUDE_CLI]) + ["--resume", cli_session_id]
 
 
+def _build_cli_error_message(err_msg: str, cli_sid: str | None) -> str:
+    err_text = str(err_msg or "")
+    err_lower = err_text.lower()
+    if cli_sid and (
+        "invalid" in err_lower
+        or "signature" in err_lower
+        or "invalid_request" in err_lower
+        or "no conversation found" in err_lower
+        or "unknown session" in err_lower
+    ):
+        return (
+            f"无法续用会话 {cli_sid[:12]}...：当前会话已失效或与当前模型/API 配置不兼容。"
+            f"请新建空白会话后重试。"
+        )
+    if "超时" in err_text or "timeout" in err_lower:
+        return "处理超时，请稍后重试。"
+    if "启动失败" in err_text:
+        return "目标 CLI 未找到，请检查安装。"
+    return "处理失败，请查看服务端日志了解详情。"
+
+
 async def _call_cli(prompt: str, cli_session_id: str = None, cwd: str | None = None, status_callback=None, model_provider: str = "claude", interaction_queue: asyncio.Queue | None = None) -> tuple[str, str | None]:
     """调用 CLI（流式），支持 provider 特定 resume 继续会话。
     interaction_queue: 用于接收前端交互回复（AskUserQuestion 等），由 server 层注入。
     """
     provider = _normalize_model_provider(model_provider)
+    codex_output_path = None
     if provider == "codex":
         base_cmd = CODEX_CLI if isinstance(CODEX_CLI, list) else [CODEX_CLI]
+        os.makedirs(RUNTIME_TMP_DIR, exist_ok=True)
+        fd, codex_output_path = tempfile.mkstemp(prefix="codex_last_message_", suffix=".txt", dir=RUNTIME_TMP_DIR)
+        os.close(fd)
         if cli_session_id:
             cmd = _build_resume_command(provider, cli_session_id) + [prompt]
         else:
@@ -406,6 +444,8 @@ async def _call_cli(prompt: str, cli_session_id: str = None, cwd: str | None = N
                 "--json",
                 "--full-auto",
                 "--skip-git-repo-check",
+                "--output-last-message",
+                codex_output_path,
                 prompt,
             ]
     else:
@@ -635,11 +675,38 @@ async def _call_cli(prompt: str, cli_session_id: str = None, cwd: str | None = N
 
     if result_is_error:
         error_detail = result_text or stderr or "(无详情)"
+        if codex_output_path and os.path.exists(codex_output_path):
+            try:
+                os.remove(codex_output_path)
+            except OSError:
+                pass
         raise RuntimeError(f"{provider} CLI 返回错误: {error_detail[-500:]}")
     if proc.returncode != 0 and not result_text:
+        if codex_output_path and os.path.exists(codex_output_path):
+            try:
+                os.remove(codex_output_path)
+            except OSError:
+                pass
         raise RuntimeError(f"{provider} CLI 失败 (code {proc.returncode}): {stderr[-500:]}")
     if proc.returncode != 0:
         log.warning("%s CLI 返回非零退出码 %d，但已获取到结果，继续处理 (stderr: %s)", provider, proc.returncode, stderr[-200:])
+
+    if provider == "codex" and not result_text and codex_output_path and os.path.exists(codex_output_path):
+        try:
+            with open(codex_output_path, encoding="utf-8") as f:
+                result_text = f.read().strip()
+        except OSError as e:
+            log.warning("读取 codex 最终消息失败: %s", e)
+        finally:
+            try:
+                os.remove(codex_output_path)
+            except OSError:
+                pass
+    elif codex_output_path and os.path.exists(codex_output_path):
+        try:
+            os.remove(codex_output_path)
+        except OSError:
+            pass
 
     return (result_text or "").strip(), new_session_id
 
@@ -818,10 +885,15 @@ async def _handle_non_amber(data: dict, status_callback, interaction_queue: asyn
     requested_provider = data.get("model_provider")
     page_key = _resolve_page_key(page_url, page_meta, None)
     session = _resolve_session(page_key, page_url, requested_session_id, requested_provider)
-    if requested_session_id or not session.get("model_provider"):
-        session = _ensure_session_model_provider(session, requested_provider)
+    previous_provider = session.get("model_provider")
+    session = _ensure_session_model_provider(session, requested_provider)
+    provider_changed = bool(
+        requested_provider
+        and previous_provider
+        and _normalize_model_provider(previous_provider) != session.get("model_provider")
+    )
 
-    cli_sid = store.get_thread_id(parent_id) if parent_id else None
+    cli_sid = None if provider_changed else (store.get_thread_id(parent_id) if parent_id else None)
     if not cli_sid:
         cli_sid = session.get("cli_session_id")
 
@@ -848,15 +920,9 @@ async def _handle_non_amber(data: dict, status_callback, interaction_queue: asyn
         )
     except RuntimeError as e:
         err_msg = str(e)
-        if cli_sid and ("Invalid" in err_msg or "signature" in err_msg or "invalid_request" in err_msg):
-            friendly = (
-                f"无法续用会话 {cli_sid[:12]}...：当前 API 配置与原始会话不兼容"
-                f"（模型或 API 地址不同）。请新建空白会话后重试。"
-            )
-        elif "超时" in err_msg or "Timeout" in err_msg:
+        if "超时" in err_msg or "Timeout" in err_msg:
             log.warning("通用页面 CLI 超时: %s", err_msg[:200])
-            friendly = "处理超时，请稍后重试。"
-            friendly = "处理失败，请查看服务端日志了解详情。"
+        friendly = _build_cli_error_message(err_msg, cli_sid)
         store.add_message(
             session_id=session["id"],
             role="assistant",
@@ -920,12 +986,23 @@ async def process_comment(data: dict, status_callback, interaction_queue: asynci
     await status_callback("processing", f"已追溯到脚本: {os.path.basename(source_info['script_path'])}")
 
     session = _resolve_session(page_key, page_url, requested_session_id, requested_provider)
-    if requested_session_id or not session.get("model_provider"):
-        session = _ensure_session_model_provider(session, requested_provider)
+    previous_provider = session.get("model_provider")
+    session = _ensure_session_model_provider(session, requested_provider)
+    provider_changed = bool(
+        requested_provider
+        and previous_provider
+        and _normalize_model_provider(previous_provider) != session.get("model_provider")
+    )
 
     # 自动链接创建者会话
     creator_sid = data.get("page_meta", {}).get("creator_session")
-    if creator_sid and not session.get("cli_session_id") and session.get("session_type", "normal") == "normal":
+    if (
+        creator_sid
+        and not provider_changed
+        and session.get("model_provider") == "claude"
+        and not session.get("cli_session_id")
+        and session.get("session_type", "normal") == "normal"
+    ):
         store.update_session(session["id"],
                              cli_session_id=creator_sid,
                              creator_session_id=creator_sid,
@@ -937,7 +1014,7 @@ async def process_comment(data: dict, status_callback, interaction_queue: asynci
             session_type="linked",
         )
 
-    cli_sid = store.get_thread_id(parent_id) if parent_id else None
+    cli_sid = None if provider_changed else (store.get_thread_id(parent_id) if parent_id else None)
     if not cli_sid:
         cli_sid = session.get("cli_session_id")
 
@@ -958,7 +1035,7 @@ async def process_comment(data: dict, status_callback, interaction_queue: asynci
     before_snapshot = _snapshot_files(modifiable_files)
     backups = _backup_files(modifiable_files)
 
-    await status_callback("editing", "Claude 正在思考...")
+    await status_callback("editing", "AI 正在思考...")
     try:
         response_text, new_cli_sid = await _call_cli(
             prompt,
@@ -971,17 +1048,11 @@ async def process_comment(data: dict, status_callback, interaction_queue: asynci
     except RuntimeError as e:
         err_msg = str(e)
         _cleanup_backups(backups)
-
-        if cli_sid and ("Invalid" in err_msg or "signature" in err_msg or "invalid_request" in err_msg):
-            log.warning("Resume 失败（API 不兼容）: %s", err_msg[:200])
-            friendly = (
-                f"无法续用会话 {cli_sid[:12]}...：当前 API 配置与原始会话不兼容"
-                f"（模型或 API 地址不同）。请新建空白会话后重试。"
-            )
-        elif "超时" in err_msg or "Timeout" in err_msg:
+        if "超时" in err_msg or "Timeout" in err_msg:
             log.warning("Amber dashboard CLI 超时: %s", err_msg[:200])
-            friendly = "处理超时，请稍后重试。"
-            friendly = "处理失败，请查看服务端日志了解详情。"
+        elif cli_sid and ("invalid" in err_msg.lower() or "signature" in err_msg.lower() or "no conversation found" in err_msg.lower()):
+            log.warning("Resume 失败: %s", err_msg[:200])
+        friendly = _build_cli_error_message(err_msg, cli_sid)
 
         store.add_message(session_id=session["id"], role="assistant", content=friendly,
                           parent_id=user_msg["id"])

@@ -1,5 +1,6 @@
 """PageComment 服务器配置"""
 import os
+import shutil
 
 PORT = 18080
 HOST = "localhost"
@@ -11,7 +12,18 @@ CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 # 直接用 claude.exe 完整路径，避免 cmd /c 弹出黑窗口。
 # 如需覆盖，可设置环境变量 CLAUDE_CLI。
 CLAUDE_CLI = os.environ.get("CLAUDE_CLI", "").split() or [r"C:\Users\ASUS\.local\bin\claude.exe"]
-CODEX_CLI = os.environ.get("CODEX_CLI", "").split() or ["codex"]
+
+
+def _resolve_default_codex_cli() -> list[str]:
+    """Windows 下避免命中 codex.ps1，优先使用 cmd/exe 包装器。"""
+    for candidate in ("codex.cmd", "codex.exe"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return [resolved]
+    return ["cmd", "/c", "codex"]
+
+
+CODEX_CLI = os.environ.get("CODEX_CLI", "").split() or _resolve_default_codex_cli()
 CLI_TIMEOUT = int(os.environ.get("CLI_TIMEOUT", "300"))
 
 # Claude CLI 允许自动使用的工具列表（与交互式 CLI 一致：常用工具全部放行）

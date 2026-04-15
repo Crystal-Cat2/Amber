@@ -327,6 +327,20 @@ runTest("buildResumeCommand adapts to provider", () => {
   assert.equal(utils.buildResumeCommand("codex", "sid-2"), "codex resume sid-2");
 });
 
+runTest("resolveModelProvider lets popup selection override existing session provider", () => {
+  const utils = loadUtils();
+  assert.equal(utils.resolveModelProvider("codex", "claude"), "codex");
+  assert.equal(utils.resolveModelProvider("claude", "codex"), "claude");
+  assert.equal(utils.resolveModelProvider("", "codex"), "codex");
+  assert.equal(utils.resolveModelProvider("", ""), "claude");
+});
+
+runTest("getThinkingStatusMessage stays provider-neutral", () => {
+  const utils = loadUtils();
+  assert.equal(utils.getThinkingStatusMessage("codex"), "AI 正在思考...");
+  assert.equal(utils.getThinkingStatusMessage("claude"), "AI 正在思考...");
+});
+
 runTest("shouldSendPageContext depends on toggle and selection", () => {
   const utils = loadUtils();
   assert.equal(utils.shouldSendPageContext({ selectedText: "", sendPageContext: true }), true);
@@ -379,6 +393,16 @@ runTest("getInteractionPendingHint returns explicit waiting copy", () => {
     utils.getInteractionPendingHint(),
     "AI 需要你的确认，请选择一个选项或直接输入回复。"
   );
+});
+
+runTest("shouldScheduleResultPoll only returns true for active processing states", () => {
+  const utils = loadUtils();
+  assert.equal(utils.shouldScheduleResultPoll("processing"), true);
+  assert.equal(utils.shouldScheduleResultPoll("editing"), true);
+  assert.equal(utils.shouldScheduleResultPoll("regenerating"), true);
+  assert.equal(utils.shouldScheduleResultPoll("interaction"), true);
+  assert.equal(utils.shouldScheduleResultPoll("done"), false);
+  assert.equal(utils.shouldScheduleResultPoll(""), false);
 });
 
 runTest("renderMarkdownToHtml auto-links bare URLs", () => {

@@ -1,10 +1,10 @@
--- ad_kill 实验：第5关 DAU 及 scene 分布
+-- ad_kill 实验：第5关用户 scene 分组上游
 -- 口径：
 -- 1. 只看第5关 game_new_start（levelid=5, activity_id=0）
 -- 2. long / short 按首次出现时间判定，谁先出现归谁
--- 3. 若两者都未出现，则按第5关杀广告次数分为 other_0/1/2/3plus
+-- 3. 若两者都未出现，则按第5关 lib_fullscreen_ad_killed 次数分为 other_0/1/2/3plus
 -- 输出：
---   product, ab_group, scene_group, ad_kill_scene, level5_dau, pv, uv, uv_ratio
+--   product, user_pseudo_id, ab_group, scene_group, first_long_ts, first_short_ts, kill_count
 
 WITH level5_gns_events AS (
   SELECT
@@ -66,7 +66,7 @@ level5_users AS (
   SELECT
     product,
     user_pseudo_id,
-    ARRAY_AGG(ab_group IGNORE NULLS ORDER BY event_timestamp ASC LIMIT 1)[SAFE_OFFSET(0)] AS ab_group
+    ARRAY_AGG(DISTINCT ab_group IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] AS ab_group
   FROM level5_gns_events
   GROUP BY product, user_pseudo_id
   HAVING ab_group IS NOT NULL
@@ -110,84 +110,34 @@ kill_counts AS (
     AND user_pseudo_id IS NOT NULL
     AND user_pseudo_id != ''
   GROUP BY user_pseudo_id
-),
-
-user_scene AS (
-  SELECT
-    u.product,
-    u.user_pseudo_id,
-    u.ab_group,
-    CASE
-      WHEN first_long_ts IS NOT NULL AND first_short_ts IS NOT NULL THEN
-        CASE
-          WHEN first_long_ts < first_short_ts THEN 'long'
-          WHEN first_short_ts < first_long_ts THEN 'short'
-          ELSE 'long'
-        END
-      WHEN first_long_ts IS NOT NULL THEN 'long'
-      WHEN first_short_ts IS NOT NULL THEN 'short'
-      WHEN COALESCE(k.kill_count, 0) = 0 THEN 'other_0'
-      WHEN COALESCE(k.kill_count, 0) = 1 THEN 'other_1'
-      WHEN COALESCE(k.kill_count, 0) = 2 THEN 'other_2'
-      ELSE 'other_3plus'
-    END AS scene_group
-  FROM level5_users AS u
-  LEFT JOIN scene_first_seen AS s
-    ON u.product = s.product
-   AND u.user_pseudo_id = s.user_pseudo_id
-  LEFT JOIN kill_counts AS k
-    ON u.product = k.product
-   AND u.user_pseudo_id = k.user_pseudo_id
-),
-
-level5_dau AS (
-  SELECT
-    product,
-    ab_group,
-    COUNT(DISTINCT user_pseudo_id) AS dau
-  FROM user_scene
-  GROUP BY product, ab_group
-),
-
-scene_uv AS (
-  SELECT
-    product,
-    ab_group,
-    scene_group,
-    COUNT(DISTINCT user_pseudo_id) AS uv
-  FROM user_scene
-  GROUP BY product, ab_group, scene_group
-),
-
-scene_pv AS (
-  SELECT
-    us.product,
-    us.ab_group,
-    us.scene_group,
-    COUNT(*) AS pv
-  FROM level5_gns_events AS ev
-  INNER JOIN user_scene AS us
-    ON ev.product = us.product
-   AND ev.user_pseudo_id = us.user_pseudo_id
-  WHERE ev.ab_group IS NOT NULL
-  GROUP BY us.product, us.ab_group, us.scene_group
 )
 
 SELECT
-  s.product,
-  s.ab_group,
-  s.scene_group,
-  s.scene_group AS ad_kill_scene,
-  d.dau AS level5_dau,
-  COALESCE(p.pv, 0) AS pv,
-  s.uv,
-  ROUND(SAFE_DIVIDE(s.uv, d.dau), 4) AS uv_ratio
-FROM scene_uv AS s
-JOIN level5_dau AS d
-  ON s.product = d.product
- AND s.ab_group = d.ab_group
-LEFT JOIN scene_pv AS p
-  ON s.product = p.product
- AND s.ab_group = p.ab_group
- AND s.scene_group = p.scene_group
-ORDER BY s.product, s.ab_group, s.scene_group;
+  u.product,
+  u.user_pseudo_id,
+  u.ab_group,
+  CASE
+    WHEN first_long_ts IS NOT NULL AND first_short_ts IS NOT NULL THEN
+      CASE
+        WHEN first_long_ts < first_short_ts THEN 'long'
+        WHEN first_short_ts < first_long_ts THEN 'short'
+        ELSE 'long'
+      END
+    WHEN first_long_ts IS NOT NULL THEN 'long'
+    WHEN first_short_ts IS NOT NULL THEN 'short'
+    WHEN COALESCE(k.kill_count, 0) = 0 THEN 'other_0'
+    WHEN COALESCE(k.kill_count, 0) = 1 THEN 'other_1'
+    WHEN COALESCE(k.kill_count, 0) = 2 THEN 'other_2'
+    ELSE 'other_3plus'
+  END AS scene_group,
+  first_long_ts,
+  first_short_ts,
+  COALESCE(k.kill_count, 0) AS kill_count
+FROM level5_users AS u
+LEFT JOIN scene_first_seen AS s
+  ON u.product = s.product
+ AND u.user_pseudo_id = s.user_pseudo_id
+LEFT JOIN kill_counts AS k
+  ON u.product = k.product
+ AND u.user_pseudo_id = k.user_pseudo_id
+ORDER BY u.product, u.ab_group, scene_group, u.user_pseudo_id;

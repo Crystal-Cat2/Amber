@@ -232,6 +232,21 @@
     return `claude --resume ${sessionId || ""}`.trim();
   }
 
+  function getThinkingStatusMessage(provider) {
+    return "AI 正在思考...";
+  }
+
+  function resolveModelProvider(selectedProvider, sessionProvider) {
+    const normalize = (value) => String(value || "").trim().toLowerCase() === "codex" ? "codex" : "claude";
+    if (String(selectedProvider || "").trim()) {
+      return normalize(selectedProvider);
+    }
+    if (String(sessionProvider || "").trim()) {
+      return normalize(sessionProvider);
+    }
+    return "claude";
+  }
+
   function shouldSendPageContext(state) {
     const selectedText = normalizeText(state?.selectedText || "");
     return !selectedText && !!state?.sendPageContext;
@@ -383,6 +398,10 @@
 
   function getInteractionPendingHint() {
     return "AI 需要你的确认，请选择一个选项或直接输入回复。";
+  }
+
+  function shouldScheduleResultPoll(status) {
+    return ["processing", "editing", "regenerating", "interaction"].includes(String(status || "").trim());
   }
 
   function escapeHtml(text) {
@@ -572,6 +591,7 @@
     detectChartElement,
     findSectionRoot,
     findTitle,
+    getThinkingStatusMessage,
     getInteractionPendingHint,
     getLegacyHostKey,
     getPendingStatusMeta,
@@ -586,10 +606,12 @@
     normalizeFeishuTable,
     normalizePageUrl,
     normalizeText,
+    resolveModelProvider,
     renderMarkdownToHtml,
     removeDraftById,
     renumberDraftEntries,
     shouldSendPageContext,
+    shouldScheduleResultPoll,
     shouldSuppressEmptySelectionCleanup,
     updateDraftComment,
   };
